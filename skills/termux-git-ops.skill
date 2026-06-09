@@ -37,6 +37,10 @@ To prevent command failures, follow these execution guidelines:
   * **Build**: `node node_modules/@nestjs/cli/bin/nest.js build`
   * **Start Dev Server**: `node node_modules/@nestjs/cli/bin/nest.js start --watch`
   * **Start Production Server**: `node node_modules/@nestjs/cli/bin/nest.js start`
+  * **Generate Module**: `node node_modules/@nestjs/cli/bin/nest.js generate module <module-name>`
+  * **Generate Service**: `node node_modules/@nestjs/cli/bin/nest.js generate service <service-name> --no-spec`
+  * **Generate Controller**: `node node_modules/@nestjs/cli/bin/nest.js generate controller <controller-name> --no-spec`
+  * **Generate CRUD Resource**: `node node_modules/@nestjs/cli/bin/nest.js generate resource <resource-name>`
 
 ### C. Installing NPM Packages
 * If dependency conflicts arise (e.g., peer dependency issues with TypeScript versions or React/Svelte packages), use the `--legacy-peer-deps` flag:

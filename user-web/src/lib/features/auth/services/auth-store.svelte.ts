@@ -1,4 +1,5 @@
 import { goto } from '$app/navigation';
+import { apiConfig } from '$lib/services/api-config.svelte';
 
 export interface UserSession {
   id: number;
@@ -55,7 +56,7 @@ class AuthStore {
 
   async login(email: string, pass: string): Promise<boolean> {
     try {
-      const res = await fetch('http://localhost:3000/auth/login', {
+      const res = await fetch(`${apiConfig.baseUrl}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password: pass }),
@@ -87,7 +88,7 @@ class AuthStore {
 
   async loginWithGoogle(googleToken: string): Promise<boolean> {
     try {
-      const res = await fetch('http://localhost:3000/auth/google', {
+      const res = await fetch(`${apiConfig.baseUrl}/auth/google`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token: googleToken }),
@@ -119,7 +120,7 @@ class AuthStore {
 
   async register(name: string, email: string, pass: string, role: string): Promise<boolean> {
     try {
-      const res = await fetch('http://localhost:3000/users', {
+      const res = await fetch(`${apiConfig.baseUrl}/users`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, email, password: pass, role }),
@@ -135,7 +136,7 @@ class AuthStore {
   async logout() {
     if (this.token) {
       try {
-        await fetch('http://localhost:3000/auth/logout', {
+        await fetch(`${apiConfig.baseUrl}/auth/logout`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${this.token}`,

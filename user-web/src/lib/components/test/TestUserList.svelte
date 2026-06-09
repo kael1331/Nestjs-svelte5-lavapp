@@ -36,7 +36,7 @@
 
     submitting = true;
     try {
-      const created = await createUser(newName, newEmail);
+      const created = await createUser(newName, newEmail, 'client');
       // Actualizamos el estado local agregando el nuevo usuario real
       users = [...users, created];
       // Limpiamos los campos

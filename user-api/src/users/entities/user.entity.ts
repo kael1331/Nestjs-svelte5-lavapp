@@ -1,5 +1,6 @@
-import { Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, OneToOne } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
+import { CarWash } from '../../car-washes/entities/car-wash.entity';
 
 export enum UserRole {
   CLIENT = 'client',
@@ -35,4 +36,8 @@ export class User {
   @Column({ nullable: true, unique: true })
   @ApiProperty({ description: 'ID único de Google del usuario', required: false })
   googleId?: string;
+
+  @OneToOne(() => CarWash, (carWash) => carWash.admin)
+  @ApiProperty({ type: () => CarWash, description: 'Establecimiento del administrador', required: false })
+  carWash?: CarWash;
 }

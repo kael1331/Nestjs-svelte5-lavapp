@@ -125,6 +125,12 @@ Debido al entorno sandboxed de Termux en Android, la ejecución habitual de scri
   ```bash
   node node_modules/@nestjs/cli/bin/nest.js start --watch
   ```
+* **Generación de recursos (CLI NestJS):**
+  ```bash
+  node node_modules/@nestjs/cli/bin/nest.js generate module <nombre>
+  node node_modules/@nestjs/cli/bin/nest.js generate service <nombre> --no-spec
+  node node_modules/@nestjs/cli/bin/nest.js generate controller <nombre> --no-spec
+  ```
 
 ### C. Instalaciones de paquetes npm
 * Si es necesario instalar nuevas dependencias, agrega siempre el flag `--legacy-peer-deps` para evitar conflictos estrictos con versiones de TypeScript o React/Svelte:
@@ -140,18 +146,7 @@ Al terminar cualquier cambio:
 1. Asegúrate de ejecutar un build completo en frontend y backend para comprobar la integridad del tipado y la compilación.
 2. Añade todos los cambios locales: `git add .`.
 3. Haz un commit estructurado: `git commit -m "feat/fix: <descripción descriptiva>"`.
-4. Sube la rama a ambos remotos configurados:
+4. Sube la rama al remoto configurado:
    - Repositorio del Proyecto: `git push origin main`
-   - Repositorio Plantilla: `git push template main`
 
----
 
-## 6. Siguientes Pasos de Implementación Recomendados
-
-Si estás asumiendo este proyecto en un nuevo chat, tu enfoque de desarrollo debe concentrarse en expandir el sistema de forma modular de acuerdo con las siguientes tareas planificadas:
-
-1. **Implementar el Módulo de Operaciones (`admin`):**
-   * Crear la feature `orders` en `src/lib/features/orders/`.
-   * Integrar la lógica para que los clientes puedan crear solicitudes de lavado, los administradores puedan ver las "Operaciones Activas" para gestionarlas y despacharlas, y el súper administrador mantenga un log histórico general.
-2. **Habilitar la pantalla de "Configuración del Sistema" (`super_admin`):**
-   * Agregar opciones para realizar copias de seguridad de la base de datos SQLite y configurar expiraciones del token en caliente.

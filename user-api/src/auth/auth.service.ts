@@ -35,7 +35,14 @@ export class AuthService {
       throw new UnauthorizedException('Credenciales inválidas');
     }
 
-    const payload = { sub: user.id, email: user.email, role: user.role, name: user.name };
+    const payload = {
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+      name: user.name,
+      carWashId: user.carWash?.id || null,
+      isServiceActive: user.carWash?.isServiceActive || false,
+    };
     return {
       access_token: await this.jwtService.signAsync(payload),
     };
@@ -69,7 +76,14 @@ export class AuthService {
         }
       }
 
-      const jwtPayload = { sub: user.id, email: user.email, role: user.role, name: user.name };
+      const jwtPayload = {
+        sub: user.id,
+        email: user.email,
+        role: user.role,
+        name: user.name,
+        carWashId: user.carWash?.id || null,
+        isServiceActive: user.carWash?.isServiceActive || false,
+      };
       return {
         access_token: await this.jwtService.signAsync(jwtPayload),
       };

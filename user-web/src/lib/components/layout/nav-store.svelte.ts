@@ -7,6 +7,7 @@ export interface MenuItem {
 export const MENU_ITEMS: MenuItem[] = [
   { id: 'home', label: 'Resumen', roles: ['client', 'admin', 'super_admin'] },
   { id: 'users', label: 'Gestión de Usuarios', roles: ['super_admin'] },
+  { id: 'subscriptions', label: 'Validar Suscripciones', roles: ['super_admin'] },
   { id: 'config', label: 'Configuración', roles: ['super_admin'] },
   { id: 'operations', label: 'Operaciones', roles: ['admin'] },
   { id: 'orders', label: 'Mis Pedidos', roles: ['client'] },

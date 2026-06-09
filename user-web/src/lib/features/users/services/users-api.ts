@@ -1,7 +1,6 @@
 import type { components } from '../../../types/api.generated';
 import { authStore } from '../../auth/services/auth-store.svelte';
-
-const API_URL = 'http://localhost:3000';
+import { apiConfig } from '../../../services/api-config.svelte';
 
 export type User = components['schemas']['User'];
 export type CreateUserDto = components['schemas']['CreateUserDto'];
@@ -20,7 +19,7 @@ function getHeaders(contentType: boolean = false): Record<string, string> {
 
 export async function fetchUsers(): Promise<User[]> {
   try {
-    const response = await fetch(`${API_URL}/users`, {
+    const response = await fetch(`${apiConfig.baseUrl}/users`, {
       headers: getHeaders(),
     });
     if (!response.ok) {
@@ -34,12 +33,12 @@ export async function fetchUsers(): Promise<User[]> {
 }
 
 export async function createUser(name: string, email: string, role: string, password?: string): Promise<User> {
-  const payload: CreateUserDto & { password?: string } = { name, email, role: role as any };
+  const payload: any = { name, email, role };
   if (password) {
     payload.password = password;
   }
   try {
-    const response = await fetch(`${API_URL}/users`, {
+    const response = await fetch(`${apiConfig.baseUrl}/users`, {
       method: 'POST',
       headers: getHeaders(true),
       body: JSON.stringify(payload),
@@ -60,7 +59,7 @@ export async function updateUser(id: number, name: string, email: string, role: 
     payload.password = password;
   }
   try {
-    const response = await fetch(`${API_URL}/users/${id}`, {
+    const response = await fetch(`${apiConfig.baseUrl}/users/${id}`, {
       method: 'PATCH',
       headers: getHeaders(true),
       body: JSON.stringify(payload),
@@ -77,7 +76,7 @@ export async function updateUser(id: number, name: string, email: string, role: 
 
 export async function deleteUser(id: number): Promise<User> {
   try {
-    const response = await fetch(`${API_URL}/users/${id}`, {
+    const response = await fetch(`${apiConfig.baseUrl}/users/${id}`, {
       method: 'DELETE',
       headers: getHeaders(),
     });
