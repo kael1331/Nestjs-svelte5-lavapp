@@ -250,6 +250,8 @@
     margin: 0;
     padding: 0;
     min-height: 100vh;
+    overflow-y: auto !important;
+    height: auto !important;
   }
 
   .login-container {
@@ -257,7 +259,7 @@
     justify-content: center;
     align-items: center;
     min-height: 100vh;
-    padding: 30px 20px;
+    padding: 24px 16px;
     box-sizing: border-box;
     background-image: radial-gradient(circle at 10% 20%, rgba(29, 108, 227, 0.1) 0%, transparent 45%);
   }
@@ -268,8 +270,8 @@
     -webkit-backdrop-filter: blur(20px);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 24px;
-    padding: 40px;
-    max-width: 440px;
+    padding: 32px 28px;
+    max-width: 420px;
     width: 100%;
     box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
     box-sizing: border-box;

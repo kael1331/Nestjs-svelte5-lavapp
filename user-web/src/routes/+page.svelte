@@ -195,8 +195,6 @@
 		background-color: #04060c;
 		font-family: 'Outfit', sans-serif;
 		color: #ffffff;
-		height: 100vh;
-		overflow: hidden;
 	}
 
 	.home-container {
