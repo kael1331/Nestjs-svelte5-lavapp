@@ -20,6 +20,8 @@
 		formData.append("email", email);
 		formData.append("message", message);
 		formData.append("subject", "Nuevo contacto desde LavaYa");
+		formData.append("from_name", "Contacto LavaYa");
+		formData.append("replyto", email);
 
 		try {
 			const response = await fetch("https://api.web3forms.com/submit", {
