@@ -10,6 +10,7 @@ export const MENU_ITEMS: MenuItem[] = [
   { id: 'subscriptions', label: 'Validar Suscripciones', roles: ['super_admin'] },
   { id: 'config', label: 'Configuración', roles: ['super_admin'] },
   { id: 'operations', label: 'Operaciones', roles: ['admin'] },
+  { id: 'membership', label: 'Mi Membresía', roles: ['admin'] },
   { id: 'orders', label: 'Mis Pedidos', roles: ['client'] },
 ];
 

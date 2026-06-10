@@ -105,6 +105,22 @@ export class CarWashesController {
     return this.carWashesService.createSubscription(adminId, receiptUrl);
   }
 
+  @Get('subscriptions')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Obtiene el listado de suscripciones según el rol del usuario' })
+  @ApiOkResponse({ type: [AdminSubscription] })
+  getSubscriptions(@Req() req: any) {
+    const userRole = req.user.role;
+    const userId = req.user.sub;
+    if (userRole === UserRole.SUPER_ADMIN) {
+      return this.carWashesService.getAllSubscriptions();
+    } else {
+      return this.carWashesService.getSubscriptionsByAdmin(userId);
+    }
+  }
+
   @Get('subscriptions/receipts/:filename')
   @UseGuards(AuthGuard, RolesGuard)
   @Roles(UserRole.SUPER_ADMIN)

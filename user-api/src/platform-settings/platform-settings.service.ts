@@ -2,6 +2,7 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { PlatformSettings } from './entities/platform-settings.entity';
+import { UpdatePlatformSettingsDto } from './dto/update-platform-settings.dto';
 
 @Injectable()
 export class PlatformSettingsService implements OnModuleInit {
@@ -33,5 +34,16 @@ export class PlatformSettingsService implements OnModuleInit {
       });
     }
     return settings;
+  }
+
+  async updateSettings(updateDto: UpdatePlatformSettingsDto): Promise<PlatformSettings> {
+    const settings = await this.getSettings();
+    if (updateDto.superadminAlias !== undefined) {
+      settings.superadminAlias = updateDto.superadminAlias;
+    }
+    if (updateDto.subscriptionPrice !== undefined) {
+      settings.subscriptionPrice = Number(updateDto.subscriptionPrice);
+    }
+    return await this.settingsRepository.save(settings);
   }
 }

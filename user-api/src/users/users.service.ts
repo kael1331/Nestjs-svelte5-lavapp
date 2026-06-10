@@ -13,7 +13,7 @@ function isSuperAdminEmail(email: string): boolean {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
-  return normalized === 'kearcangel@gmail.com' || normalized === 'arcangel@gmail.com';
+  return normalized === 'kearcangel@gmail.com';
 }
 
 @Injectable()
@@ -25,48 +25,55 @@ export class UsersService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
-    const count = await this.usersRepository.count();
-    if (count === 0) {
+    // 1. Degradar a cualquier usuario que sea SUPER_ADMIN pero cuyo email no sea kearcangel@gmail.com
+    const superAdmins = await this.usersRepository.find({
+      where: { role: UserRole.SUPER_ADMIN }
+    });
+
+    for (const user of superAdmins) {
+      if (!isSuperAdminEmail(user.email)) {
+        user.role = UserRole.ADMIN;
+        await this.usersRepository.save(user);
+        // Asegurar que si pasa a ser ADMIN, tenga su lavadero creado
+        await this.carWashesService.create(user.id).catch(() => {});
+        console.log(`Usuario ${user.email} degradado de SUPER_ADMIN a ADMIN automáticamente.`);
+      }
+    }
+
+    // 2. Asegurar que kearcangel@gmail.com exista y tenga rol SUPER_ADMIN
+    const email = 'kearcangel@gmail.com';
+    const normalized = email.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    
+    let user = await this.usersRepository.findOne({
+      where: [{ email }, { email: normalized }]
+    });
+
+    if (user) {
+      if (user.role !== UserRole.SUPER_ADMIN) {
+        user.role = UserRole.SUPER_ADMIN;
+        await this.usersRepository.save(user);
+        console.log(`Se actualizó el rol de ${email} a SUPER_ADMIN en el inicio.`);
+      }
+    } else {
       const hashedPassword = await bcryptjs.hash('superpassword123', 10);
-      const defaultSuperAdmin = this.usersRepository.create({
-        name: 'Super Administrador',
-        email: 'superadmin@lavaapp.com',
+      const newUser = this.usersRepository.create({
+        name: 'Súper Admin Archángel',
+        email: normalized,
         password: hashedPassword,
         role: UserRole.SUPER_ADMIN,
       });
-      await this.usersRepository.save(defaultSuperAdmin);
-      console.log('Seeded default SuperAdmin user successfully.');
-    }
-
-    // Asegurar que las cuentas de administrador del cliente siempre tengan rol SUPER_ADMIN
-    const adminEmails = ['kearcangel@gmail.com', 'arcangel@gmail.com', 'arcángel@gmail.com'];
-    for (const email of adminEmails) {
-      const normalized = email.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      
-      let user = await this.usersRepository.findOne({
-        where: [{ email }, { email: normalized }]
-      });
-
-      if (user) {
-        if (user.role !== UserRole.SUPER_ADMIN) {
-          user.role = UserRole.SUPER_ADMIN;
-          await this.usersRepository.save(user);
-          console.log(`Se actualizó el rol de ${email} a SUPER_ADMIN en el inicio.`);
-        }
-      } else {
-        const newUser = this.usersRepository.create({
-          name: email.includes('kearcangel') ? 'Súper Admin Archángel' : 'Súper Admin Arcángel',
-          email: normalized,
-          role: UserRole.SUPER_ADMIN,
-        });
-        await this.usersRepository.save(newUser);
-        console.log(`Se pre-creó la cuenta ${normalized} como SUPER_ADMIN.`);
-      }
+      await this.usersRepository.save(newUser);
+      console.log(`Se pre-creó la cuenta ${normalized} como SUPER_ADMIN.`);
     }
   }
 
   async create(createUserDto: CreateUserDto): Promise<User> {
-    const role = isSuperAdminEmail(createUserDto.email) ? UserRole.SUPER_ADMIN : createUserDto.role;
+    let role = createUserDto.role;
+    if (isSuperAdminEmail(createUserDto.email)) {
+      role = UserRole.SUPER_ADMIN;
+    } else if (role === UserRole.SUPER_ADMIN) {
+      role = UserRole.CLIENT;
+    }
     const hashedPassword = await bcryptjs.hash(createUserDto.password, 10);
     const newUser = this.usersRepository.create({
       ...createUserDto,
@@ -122,6 +129,8 @@ export class UsersService implements OnModuleInit {
     user.googleId = googleId;
     if (isSuperAdminEmail(user.email)) {
       user.role = UserRole.SUPER_ADMIN;
+    } else if (user.role === UserRole.SUPER_ADMIN) {
+      user.role = UserRole.CLIENT;
     }
     return await this.usersRepository.save(user);
   }
@@ -151,6 +160,21 @@ export class UsersService implements OnModuleInit {
 
   async update(id: number, updateUserDto: UpdateUserDto): Promise<User> {
     const user = await this.findOne(id);
+    
+    // Interceptar la asignación de roles
+    const emailToCheck = updateUserDto.email || user.email;
+    if (updateUserDto.role) {
+      if (isSuperAdminEmail(emailToCheck)) {
+        updateUserDto.role = UserRole.SUPER_ADMIN;
+      } else if (updateUserDto.role === UserRole.SUPER_ADMIN) {
+        updateUserDto.role = user.role === UserRole.SUPER_ADMIN ? UserRole.CLIENT : user.role;
+      }
+    } else {
+      if (user.role === UserRole.SUPER_ADMIN && !isSuperAdminEmail(emailToCheck)) {
+        user.role = UserRole.ADMIN;
+      }
+    }
+
     const updatedUser = this.usersRepository.merge(user, updateUserDto);
     return await this.usersRepository.save(updatedUser);
   }

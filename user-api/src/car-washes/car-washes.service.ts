@@ -220,4 +220,22 @@ export class CarWashesService {
 
     return savedSub;
   }
+
+  async getAllSubscriptions(): Promise<AdminSubscription[]> {
+    return await this.subscriptionRepository.find({
+      relations: { carWash: true },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  async getSubscriptionsByAdmin(adminId: number): Promise<AdminSubscription[]> {
+    const wash = await this.carWashRepository.findOne({ where: { adminId } });
+    if (!wash) {
+      return [];
+    }
+    return await this.subscriptionRepository.find({
+      where: { carWashId: wash.id },
+      order: { createdAt: 'DESC' },
+    });
+  }
 }
