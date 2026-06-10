@@ -169,6 +169,26 @@
         </button>
       </p>
     {:else}
+      <!-- Selector de Tipo de Registro (Pestañas Premium) -->
+      <div class="register-tabs">
+        <button 
+          type="button" 
+          class="tab-btn" 
+          class:active={regRole === 'client'} 
+          onclick={() => regRole = 'client'}
+        >
+          Soy Cliente
+        </button>
+        <button 
+          type="button" 
+          class="tab-btn" 
+          class:active={regRole === 'admin'} 
+          onclick={() => regRole = 'admin'}
+        >
+          Tengo un Lavadero
+        </button>
+      </div>
+
       <!-- FORMULARIO DE REGISTRO -->
       <form onsubmit={handleRegister} class="auth-form">
         <div class="form-group">
@@ -204,17 +224,8 @@
           />
         </div>
 
-        <div class="form-group">
-          <label for="reg-role">Rol de usuario</label>
-          <select id="reg-role" bind:value={regRole} class="select-input">
-            <option value="client">Cliente</option>
-            <option value="admin">Administrador</option>
-            <option value="super_admin">Súper Administrador</option>
-          </select>
-        </div>
-
         <button type="submit" class="submit-btn">
-          Registrar Cuenta
+          {regRole === 'admin' ? 'Registrar mi Negocio' : 'Registrar Cuenta'}
         </button>
       </form>
 
@@ -491,6 +502,35 @@
     background: rgba(239, 68, 68, 0.1);
     border: 1px solid rgba(239, 68, 68, 0.2);
     color: #f87171;
+  }
+
+  .register-tabs {
+    display: flex;
+    background: rgba(2, 6, 17, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 4px;
+    margin-bottom: 20px;
+  }
+
+  .tab-btn {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: #94a3b8;
+    padding: 10px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: inherit;
+  }
+
+  .tab-btn.active {
+    background: #1d6ce3;
+    color: #ffffff;
+    box-shadow: 0 4px 12px rgba(29, 108, 227, 0.25);
   }
 
   @media (max-width: 480px) {

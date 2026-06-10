@@ -23,8 +23,8 @@ export class UsersController {
   @Post()
   @ApiCreatedResponse({ type: User, description: 'Usuario creado exitosamente' })
   async create(@Body() createUserDto: CreateUserDto, @Req() req: express.Request) {
-    // Si se solicita un rol privilegiado (admin o super_admin), se requiere validación
-    if (createUserDto.role && createUserDto.role !== UserRole.CLIENT) {
+    // Si se solicita el rol super_admin, se requiere validación estricta
+    if (createUserDto.role && createUserDto.role === UserRole.SUPER_ADMIN) {
       const authHeader = req.headers.authorization;
       if (!authHeader) {
         throw new ForbiddenException('No autorizado para crear usuarios con roles privilegiados.');
