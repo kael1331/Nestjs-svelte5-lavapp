@@ -98,38 +98,29 @@
     fetchSettings();
   });
 
-  // Effect to load receipt blob when a URL is selected
-  $effect(() => {
-    if (selectedReceiptUrl) {
-      receiptLoading = true;
-      if (receiptImageBlobUrl) {
-        URL.revokeObjectURL(receiptImageBlobUrl);
-      }
+  async function selectReceipt(url: string | null) {
+    if (receiptImageBlobUrl) {
+      URL.revokeObjectURL(receiptImageBlobUrl);
       receiptImageBlobUrl = null;
-      const filename = selectedReceiptUrl.split('/').pop();
-      fetch(`${apiConfig.baseUrl}/car-washes/subscriptions/receipts/${filename}`, {
-        headers: { 'Authorization': `Bearer ${authStore.token}` }
-      })
-      .then(res => {
-        if (!res.ok) throw new Error();
-        return res.blob();
-      })
-      .then(blob => {
-        receiptImageBlobUrl = URL.createObjectURL(blob);
-      })
-      .catch(err => {
-        console.error('Error loading receipt image:', err);
-      })
-      .finally(() => {
-        receiptLoading = false;
-      });
-    } else {
-      if (receiptImageBlobUrl) {
-        URL.revokeObjectURL(receiptImageBlobUrl);
-        receiptImageBlobUrl = null;
-      }
     }
-  });
+    selectedReceiptUrl = url;
+    if (!url) return;
+
+    try {
+      receiptLoading = true;
+      const filename = url.split('/').pop();
+      const res = await fetch(`${apiConfig.baseUrl}/car-washes/subscriptions/receipts/${filename}`, {
+        headers: { 'Authorization': `Bearer ${authStore.token}` }
+      });
+      if (!res.ok) throw new Error();
+      const blob = await res.blob();
+      receiptImageBlobUrl = URL.createObjectURL(blob);
+    } catch (err) {
+      console.error('Error loading receipt image:', err);
+    } finally {
+      receiptLoading = false;
+    }
+  }
 
   async function handleApprove(id: string) {
     if (!confirm('¿Estás seguro de aprobar esta suscripción?')) return;
@@ -141,7 +132,7 @@
       });
       if (res.ok) {
         alert('Suscripción aprobada con éxito.');
-        selectedReceiptUrl = null;
+        await selectReceipt(null);
         await fetchSubscriptions();
       } else {
         alert('Error al aprobar la suscripción.');
@@ -163,7 +154,7 @@
       });
       if (res.ok) {
         alert('Suscripción rechazada con éxito.');
-        selectedReceiptUrl = null;
+        await selectReceipt(null);
         await fetchSubscriptions();
       } else {
         alert('Error al rechazar la suscripción.');
@@ -208,16 +199,16 @@
 
         <!-- Filtros de estado -->
         <div class="filter-bar">
-          <button class="filter-btn" class:active={filterStatus === 'all'} onclick={() => { filterStatus = 'all'; selectedReceiptUrl = null; }}>
+          <button class="filter-btn" class:active={filterStatus === 'all'} onclick={() => { filterStatus = 'all'; selectReceipt(null); }}>
             Todas ({subscriptions.length})
           </button>
-          <button class="filter-btn" class:active={filterStatus === 'pending'} onclick={() => { filterStatus = 'pending'; selectedReceiptUrl = null; }}>
+          <button class="filter-btn" class:active={filterStatus === 'pending'} onclick={() => { filterStatus = 'pending'; selectReceipt(null); }}>
             Pendientes ({subscriptions.filter(s => s.status === 'pending').length})
           </button>
-          <button class="filter-btn" class:active={filterStatus === 'approved'} onclick={() => { filterStatus = 'approved'; selectedReceiptUrl = null; }}>
+          <button class="filter-btn" class:active={filterStatus === 'approved'} onclick={() => { filterStatus = 'approved'; selectReceipt(null); }}>
             Aprobadas ({subscriptions.filter(s => s.status === 'approved').length})
           </button>
-          <button class="filter-btn" class:active={filterStatus === 'rejected'} onclick={() => { filterStatus = 'rejected'; selectedReceiptUrl = null; }}>
+          <button class="filter-btn" class:active={filterStatus === 'rejected'} onclick={() => { filterStatus = 'rejected'; selectReceipt(null); }}>
             Rechazadas ({subscriptions.filter(s => s.status === 'rejected').length})
           </button>
         </div>
@@ -247,7 +238,7 @@
                     <span class="sub-details">Monto: ${sub.amountPaid} | Creado: {new Date(sub.createdAt).toLocaleDateString()}</span>
                   </div>
                   <div class="sub-actions">
-                    <button class="btn-secondary" onclick={() => selectedReceiptUrl = sub.receiptUrl}>
+                    <button class="btn-secondary" onclick={() => selectReceipt(sub.receiptUrl)}>
                       Ver Comprobante
                     </button>
                     {#if sub.status === 'pending'}
