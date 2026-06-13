@@ -169,7 +169,16 @@ export class CarWashesService {
 
     // Actualizar estado de activación y vencimiento del lavadero
     const wash = sub.carWash;
-    const expiration = new Date();
+    const currentExpiration = wash.subscriptionExpiresAt;
+    const now = new Date();
+
+    // Si la membresía actual está activa y vence en el futuro, sumamos desde ese vencimiento.
+    // Si no, sumamos a partir de hoy.
+    const baseDate = (currentExpiration && new Date(currentExpiration) > now)
+      ? new Date(currentExpiration)
+      : now;
+
+    const expiration = new Date(baseDate);
     expiration.setDate(expiration.getDate() + 30); // 30 días de suscripción
 
     await this.carWashRepository.update(wash.id, {

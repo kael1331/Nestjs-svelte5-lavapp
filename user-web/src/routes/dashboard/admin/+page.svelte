@@ -193,7 +193,7 @@
             <!-- Panel de Pago -->
             <div class="payment-card-static">
               <h4 class="payment-title">Renovar / Activar Suscripción</h4>
-              <p class="payment-subtitle">Realiza una transferencia bancaria con los siguientes datos y sube tu comprobante de pago.</p>
+              <p class="payment-subtitle">Realiza una transferencia bancaria con los siguientes datos y sube tu comprobante. Puedes realizar renovaciones anticipadas y los 30 días se acumularán al final de tu período actual.</p>
 
               <div class="transfer-details">
                 <div class="detail-item">
