@@ -15,6 +15,8 @@ import { CarWashesModule } from './car-washes/car-washes.module';
 import { CarWash } from './car-washes/entities/car-wash.entity';
 import { CarWashBay } from './car-washes/entities/car-wash-bay.entity';
 import { AdminSubscription } from './car-washes/entities/admin-subscription.entity';
+import { AdminVehicle } from './car-washes/entities/admin-vehicle.entity';
+import { CarWashPhoto } from './car-washes/entities/car-wash-photo.entity';
 import { ServicesModule } from './services/services.module';
 
 import { Service } from './services/entities/service.entity';
@@ -38,6 +40,8 @@ import { Booking } from './bookings/entities/booking.entity';
         CarWash,
         CarWashBay,
         AdminSubscription,
+        AdminVehicle,
+        CarWashPhoto,
         Service,
         Schedule,
         ScheduleException,

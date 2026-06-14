@@ -23,6 +23,13 @@ export class ServicesService {
       throw new BadRequestException('La duración del servicio debe ser múltiplo de 15 minutos.');
     }
 
+    // Validar tipo de vehículo
+    const vehicles = await this.carWashesService.getVehiclesByAdmin(adminId);
+    const activeVehicleNames = vehicles.filter(v => v.isActive).map(v => v.name.toLowerCase());
+    if (!activeVehicleNames.includes(createDto.vehicleType.toLowerCase())) {
+      throw new BadRequestException(`El tipo de vehículo '${createDto.vehicleType}' no está habilitado en tu catálogo.`);
+    }
+
     const carWash = await this.carWashesService.getWashByAdmin(adminId);
 
     const newService = this.serviceRepository.create({
@@ -68,6 +75,14 @@ export class ServicesService {
   }): Promise<Service> {
     if (updateDto.durationMinutes !== undefined && updateDto.durationMinutes % 15 !== 0) {
       throw new BadRequestException('La duración del servicio debe ser múltiplo de 15 minutos.');
+    }
+
+    if (updateDto.vehicleType !== undefined) {
+      const vehicles = await this.carWashesService.getVehiclesByAdmin(adminId);
+      const activeVehicleNames = vehicles.filter(v => v.isActive).map(v => v.name.toLowerCase());
+      if (!activeVehicleNames.includes(updateDto.vehicleType.toLowerCase())) {
+        throw new BadRequestException(`El tipo de vehículo '${updateDto.vehicleType}' no está habilitado en tu catálogo.`);
+      }
     }
 
     const service = await this.findOneByAdmin(adminId, id);

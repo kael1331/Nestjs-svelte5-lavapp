@@ -1,9 +1,13 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { existsSync, unlinkSync } from 'fs';
+import { join } from 'path';
 import { CarWash } from './entities/car-wash.entity';
 import { CarWashBay, BayStatus } from './entities/car-wash-bay.entity';
 import { AdminSubscription, SubscriptionStatus } from './entities/admin-subscription.entity';
+import { AdminVehicle } from './entities/admin-vehicle.entity';
+import { CarWashPhoto } from './entities/car-wash-photo.entity';
 import { PlatformSettings } from '../platform-settings/entities/platform-settings.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 
@@ -18,6 +22,10 @@ export class CarWashesService {
     private readonly subscriptionRepository: Repository<AdminSubscription>,
     @InjectRepository(PlatformSettings)
     private readonly platformSettingsRepository: Repository<PlatformSettings>,
+    @InjectRepository(AdminVehicle)
+    private readonly vehicleRepository: Repository<AdminVehicle>,
+    @InjectRepository(CarWashPhoto)
+    private readonly photoRepository: Repository<CarWashPhoto>,
     private readonly notificationsService: NotificationsService,
   ) {}
 
@@ -48,6 +56,7 @@ export class CarWashesService {
       relations: {
         bays: true,
         subscriptions: true,
+        photos: true,
       },
     });
 
@@ -246,5 +255,137 @@ export class CarWashesService {
       where: { carWashId: wash.id },
       order: { createdAt: 'DESC' },
     });
+  }
+
+  // --- GESTIÓN DE VEHÍCULOS DEL ADMINISTRADOR ---
+
+  async getVehiclesByAdmin(adminId: number): Promise<AdminVehicle[]> {
+    const list = await this.vehicleRepository.find({
+      where: { adminId },
+    });
+
+    if (list.length === 0) {
+      // Sembrar por defecto
+      const defaultNames = ['auto', 'camioneta', 'moto'];
+      const created: AdminVehicle[] = [];
+      for (const name of defaultNames) {
+        const v = this.vehicleRepository.create({
+          adminId,
+          name,
+          isActive: true,
+        });
+        created.push(await this.vehicleRepository.save(v));
+      }
+      return created;
+    }
+
+    return list;
+  }
+
+  async addVehicle(adminId: number, name: string): Promise<AdminVehicle> {
+    if (!name || name.trim() === '') {
+      throw new BadRequestException('El nombre del vehículo no puede estar vacío.');
+    }
+    const cleanName = name.trim().toLowerCase();
+
+    // Validar si existe duplicado (insensible a mayúsculas)
+    const existing = await this.vehicleRepository.findOne({
+      where: { adminId, name: cleanName }
+    });
+    if (existing) {
+      throw new BadRequestException(`El vehículo '${name}' ya está configurado.`);
+    }
+
+    const newVehicle = this.vehicleRepository.create({
+      adminId,
+      name: cleanName,
+      isActive: true,
+    });
+    return await this.vehicleRepository.save(newVehicle);
+  }
+
+  async updateVehicle(
+    adminId: number,
+    vehicleId: string,
+    updateDto: { name?: string; isActive?: boolean }
+  ): Promise<AdminVehicle> {
+    const vehicle = await this.vehicleRepository.findOne({
+      where: { id: vehicleId, adminId }
+    });
+    if (!vehicle) {
+      throw new NotFoundException('Vehículo no encontrado o no autorizado.');
+    }
+
+    if (updateDto.name !== undefined) {
+      const cleanName = updateDto.name.trim().toLowerCase();
+      if (cleanName === '') {
+        throw new BadRequestException('El nombre del vehículo no puede estar vacío.');
+      }
+      // Si cambia el nombre, validar duplicados
+      if (cleanName !== vehicle.name) {
+        const duplicate = await this.vehicleRepository.findOne({
+          where: { adminId, name: cleanName }
+        });
+        if (duplicate) {
+          throw new BadRequestException(`Ya tienes configurado un vehículo con el nombre '${updateDto.name}'.`);
+        }
+        vehicle.name = cleanName;
+      }
+    }
+
+    if (updateDto.isActive !== undefined) {
+      vehicle.isActive = updateDto.isActive;
+    }
+
+    return await this.vehicleRepository.save(vehicle);
+  }
+
+  async deleteVehicle(adminId: number, vehicleId: string): Promise<void> {
+    const vehicle = await this.vehicleRepository.findOne({
+      where: { id: vehicleId, adminId }
+    });
+    if (!vehicle) {
+      throw new NotFoundException('Vehículo no encontrado o no autorizado.');
+    }
+    await this.vehicleRepository.remove(vehicle);
+  }
+
+  // --- GESTIÓN DE FOTOS DEL LAVADERO ---
+
+  async addWashPhoto(adminId: number, url: string): Promise<CarWashPhoto> {
+    const wash = await this.getWashByAdmin(adminId);
+    const photo = this.photoRepository.create({
+      carWashId: wash.id,
+      url,
+    });
+    return await this.photoRepository.save(photo);
+  }
+
+  async deleteWashPhoto(adminId: number, photoId: string): Promise<void> {
+    const photo = await this.photoRepository.findOne({
+      where: { id: photoId },
+      relations: { carWash: true }
+    });
+    if (!photo) {
+      throw new NotFoundException('Foto no encontrada.');
+    }
+    if (photo.carWash.adminId !== adminId) {
+      throw new BadRequestException('No autorizado a eliminar esta foto.');
+    }
+
+    // Intentar borrar archivo físico
+    const filename = photo.url.split('/').pop();
+    if (filename) {
+      const filePath = join(process.cwd(), 'uploads/washes', filename);
+      if (existsSync(filePath)) {
+        try {
+          unlinkSync(filePath);
+        } catch (err) {
+          console.error('Error al eliminar archivo de foto:', err);
+        }
+      }
+    }
+
+    await this.photoRepository.remove(photo);
   }
 }

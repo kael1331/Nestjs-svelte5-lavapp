@@ -9,10 +9,57 @@
   let subscriptions = $state<any[]>([]);
   let loadingWash = $state<boolean>(true);
   let loadingSubscriptions = $state<boolean>(false);
+  
+  // Membership validation files
   let uploading = $state<boolean>(false);
   let uploadError = $state<string>('');
   let uploadSuccess = $state<string>('');
   let fileInput = $state<HTMLInputElement>();
+
+  // Wash Settings states
+  let washName = $state('');
+  let washPaymentAlias = $state('');
+  let washBaysCount = $state(1);
+  let washLat = $state<number>(-26.82414);
+  let washLng = $state<number>(-65.22260);
+  let savingWashSettings = $state(false);
+  let saveSettingsSuccess = $state('');
+  let saveSettingsError = $state('');
+
+  // Map and Geocoding states
+  let searchAddress = $state('');
+  let geocodingResults = $state<any[]>([]);
+  let searchingGeocode = $state(false);
+  let map: any = null;
+  let marker: any = null;
+  let L: any = null;
+
+  // Wash Photos Gallery states
+  let photosFileInput = $state<HTMLInputElement>();
+  let uploadingPhotos = $state(false);
+  let uploadPhotosError = $state('');
+
+  // Custom Vehicles states
+  let vehiclesList = $state<any[]>([]);
+  let loadingVehicles = $state(false);
+  let newVehicleName = $state('');
+  let addingVehicle = $state(false);
+  let vehicleError = $state('');
+
+  // Services states
+  let servicesList = $state<any[]>([]);
+  let loadingServices = $state(false);
+  let showServiceModal = $state(false);
+  let editingServiceId = $state<string | null>(null);
+  let serviceForm = $state({
+    name: '',
+    description: '',
+    vehicleType: '',
+    durationMinutes: 30,
+    price: 1000
+  });
+  let savingService = $state(false);
+  let serviceError = $state('');
 
   async function fetchWashStatus() {
     try {
@@ -22,6 +69,12 @@
       });
       if (res.ok) {
         carWash = await res.json();
+        // Populate edit settings
+        washName = carWash.name || '';
+        washPaymentAlias = carWash.clientPaymentAlias || '';
+        washBaysCount = carWash.baysCount || 1;
+        washLat = carWash.latitude ? parseFloat(carWash.latitude) : -26.82414;
+        washLng = carWash.longitude ? parseFloat(carWash.longitude) : -65.22260;
       }
     } catch (e) {
       console.error('Error fetching wash:', e);
@@ -39,7 +92,7 @@
         platformSettings = await res.json();
       }
     } catch (e) {
-      console.error('Error fetching settings:', e);
+      console.error('Error fetching platform settings:', e);
     }
   }
 
@@ -59,17 +112,378 @@
     }
   }
 
+  // Vehicles fetch
+  async function fetchVehicles() {
+    try {
+      loadingVehicles = true;
+      const res = await fetch(`${apiConfig.baseUrl}/admin-vehicles`, {
+        headers: { 'Authorization': `Bearer ${authStore.token}` }
+      });
+      if (res.ok) {
+        vehiclesList = await res.json();
+      }
+    } catch (e) {
+      console.error('Error fetching vehicles:', e);
+    } finally {
+      loadingVehicles = false;
+    }
+  }
+
+  // Services fetch
+  async function fetchServices() {
+    try {
+      loadingServices = true;
+      const res = await fetch(`${apiConfig.baseUrl}/services`, {
+        headers: { 'Authorization': `Bearer ${authStore.token}` }
+      });
+      if (res.ok) {
+        servicesList = await res.json();
+      }
+    } catch (e) {
+      console.error('Error fetching services:', e);
+    } finally {
+      loadingServices = false;
+    }
+  }
+
   onMount(async () => {
     navStore.reset('home');
     await fetchWashStatus();
     await fetchPlatformSettings();
     await fetchSubscriptions();
+    await fetchVehicles();
+    await fetchServices();
   });
 
   const latestSub = $derived(
     subscriptions.length > 0 ? subscriptions[0] : null
   );
 
+  const activeVehicles = $derived(
+    vehiclesList.filter(v => v.isActive)
+  );
+
+  // Trigger leaflet loading on Wash Settings tab
+  $effect(() => {
+    if (navStore.activeTab === 'wash-settings' && carWash) {
+      setTimeout(async () => {
+        if (typeof window !== 'undefined') {
+          if (!L) {
+            L = await import('leaflet');
+          }
+          const container = document.getElementById('map');
+          if (container) {
+            if (map) {
+              map.invalidateSize();
+              return;
+            }
+
+            const initialLat = washLat;
+            const initialLng = washLng;
+
+            map = L.map('map').setView([initialLat, initialLng], 14);
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+              attribution: '© OpenStreetMap contributors'
+            }).addTo(map);
+
+            marker = L.marker([initialLat, initialLng], { draggable: true }).addTo(map);
+
+            marker.on('dragend', () => {
+              const pos = marker.getLatLng();
+              washLat = pos.lat;
+              washLng = pos.lng;
+            });
+          }
+        }
+      }, 100);
+    }
+  });
+
+  // Toggle Manual Open
+  async function handleToggleManualOpen() {
+    if (!carWash) return;
+    const newStatus = !carWash.isManuallyOpen;
+    try {
+      const res = await fetch(`${apiConfig.baseUrl}/car-washes/my-wash`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authStore.token}`
+        },
+        body: JSON.stringify({ isManuallyOpen: newStatus })
+      });
+      if (res.ok) {
+        carWash.isManuallyOpen = newStatus;
+      }
+    } catch (e) {
+      console.error('Error toggling open status:', e);
+    }
+  }
+
+  // Save general settings
+  async function saveWashSettings() {
+    savingWashSettings = true;
+    saveSettingsSuccess = '';
+    saveSettingsError = '';
+    try {
+      const res = await fetch(`${apiConfig.baseUrl}/car-washes/my-wash`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authStore.token}`
+        },
+        body: JSON.stringify({
+          name: washName,
+          clientPaymentAlias: washPaymentAlias,
+          baysCount: washBaysCount,
+          latitude: washLat,
+          longitude: washLng
+        })
+      });
+      if (res.ok) {
+        saveSettingsSuccess = 'Configuración y ubicación guardadas con éxito.';
+        await fetchWashStatus();
+      } else {
+        const err = await res.json();
+        saveSettingsError = err.message || 'Error al actualizar la configuración.';
+      }
+    } catch (e) {
+      saveSettingsError = 'Error al conectar con el servidor.';
+    } finally {
+      savingWashSettings = false;
+    }
+  }
+
+  // Address Geocoding
+  async function handleGeocodeSearch() {
+    if (!searchAddress.trim()) return;
+    searchingGeocode = true;
+    geocodingResults = [];
+    try {
+      // Constrained to San Miguel de Tucumán, Argentina
+      const fullQuery = encodeURIComponent(searchAddress.trim() + ', San Miguel de Tucumán, Tucumán, Argentina');
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${fullQuery}&limit=5`);
+      if (res.ok) {
+        geocodingResults = await res.json();
+      }
+    } catch (e) {
+      console.error('Geocoding error:', e);
+    } finally {
+      searchingGeocode = false;
+    }
+  }
+
+  function selectGeocodeResult(res: any) {
+    const lat = parseFloat(res.lat);
+    const lon = parseFloat(res.lon);
+    washLat = lat;
+    washLng = lon;
+    geocodingResults = [];
+    searchAddress = res.display_name;
+
+    if (map && marker) {
+      map.setView([lat, lon], 16);
+      marker.setLatLng([lat, lon]);
+    }
+  }
+
+  // Multi-photo upload
+  async function handleUploadWashPhotos() {
+    if (!photosFileInput || !photosFileInput.files || photosFileInput.files.length === 0) {
+      return;
+    }
+    uploadingPhotos = true;
+    uploadPhotosError = '';
+    try {
+      for (let i = 0; i < photosFileInput.files.length; i++) {
+        const file = photosFileInput.files[i];
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const res = await fetch(`${apiConfig.baseUrl}/car-washes/my-wash/photos`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${authStore.token}`
+          },
+          body: formData
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          uploadPhotosError = err.message || 'Ocurrió un error al subir alguna foto.';
+        }
+      }
+      photosFileInput.value = '';
+      await fetchWashStatus();
+    } catch (e) {
+      uploadPhotosError = 'Error de conexión al subir fotos.';
+    } finally {
+      uploadingPhotos = false;
+    }
+  }
+
+  async function handleDeletePhoto(id: string) {
+    if (!confirm('¿Seguro que deseas eliminar esta foto de tu local?')) return;
+    try {
+      const res = await fetch(`${apiConfig.baseUrl}/car-washes/my-wash/photos/${id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${authStore.token}`
+        }
+      });
+      if (res.ok) {
+        await fetchWashStatus();
+      }
+    } catch (e) {
+      console.error('Error deleting photo:', e);
+    }
+  }
+
+  // Custom Vehicle Catalogue functions
+  async function handleAddVehicle() {
+    if (!newVehicleName.trim()) return;
+    addingVehicle = true;
+    vehicleError = '';
+    try {
+      const res = await fetch(`${apiConfig.baseUrl}/admin-vehicles`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authStore.token}`
+        },
+        body: JSON.stringify({ name: newVehicleName.trim() })
+      });
+      if (res.ok) {
+        newVehicleName = '';
+        await fetchVehicles();
+      } else {
+        const err = await res.json();
+        vehicleError = err.message || 'Error al agregar el vehículo.';
+      }
+    } catch (e) {
+      vehicleError = 'Error de conexión con el servidor.';
+    } finally {
+      addingVehicle = false;
+    }
+  }
+
+  async function toggleVehicleActive(id: string, currentStatus: boolean) {
+    try {
+      const res = await fetch(`${apiConfig.baseUrl}/admin-vehicles/${id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authStore.token}`
+        },
+        body: JSON.stringify({ isActive: !currentStatus })
+      });
+      if (res.ok) {
+        await fetchVehicles();
+      }
+    } catch (e) {
+      console.error('Error toggling vehicle status:', e);
+    }
+  }
+
+  async function handleDeleteVehicle(id: string) {
+    if (!confirm('¿Seguro que deseas eliminar este vehículo personalizado de tu catálogo?')) return;
+    try {
+      const res = await fetch(`${apiConfig.baseUrl}/admin-vehicles/${id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${authStore.token}`
+        }
+      });
+      if (res.ok) {
+        await fetchVehicles();
+      }
+    } catch (e) {
+      console.error('Error deleting vehicle:', e);
+    }
+  }
+
+  // Service CRUD functions
+  function openAddServiceModal() {
+    editingServiceId = null;
+    serviceForm = {
+      name: '',
+      description: '',
+      vehicleType: activeVehicles.length > 0 ? activeVehicles[0].name : '',
+      durationMinutes: 30,
+      price: 1500
+    };
+    serviceError = '';
+    showServiceModal = true;
+  }
+
+  function openEditServiceModal(serv: any) {
+    editingServiceId = serv.id;
+    serviceForm = {
+      name: serv.name,
+      description: serv.description || '',
+      vehicleType: serv.vehicleType,
+      durationMinutes: serv.durationMinutes,
+      price: serv.price
+    };
+    serviceError = '';
+    showServiceModal = true;
+  }
+
+  async function saveService() {
+    if (!serviceForm.name.trim() || !serviceForm.vehicleType) {
+      serviceError = 'El nombre y el tipo de vehículo son obligatorios.';
+      return;
+    }
+    savingService = true;
+    serviceError = '';
+
+    const url = editingServiceId
+      ? `${apiConfig.baseUrl}/services/${editingServiceId}`
+      : `${apiConfig.baseUrl}/services`;
+    const method = editingServiceId ? 'PATCH' : 'POST';
+
+    try {
+      const res = await fetch(url, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authStore.token}`
+        },
+        body: JSON.stringify(serviceForm)
+      });
+      if (res.ok) {
+        showServiceModal = false;
+        await fetchServices();
+      } else {
+        const err = await res.json();
+        serviceError = err.message || 'Error al guardar el servicio.';
+      }
+    } catch (e) {
+      serviceError = 'Error al conectar con el servidor.';
+    } finally {
+      savingService = false;
+    }
+  }
+
+  async function handleDeleteService(id: string) {
+    if (!confirm('¿Seguro que deseas eliminar este servicio?')) return;
+    try {
+      const res = await fetch(`${apiConfig.baseUrl}/services/${id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${authStore.token}`
+        }
+      });
+      if (res.ok) {
+        await fetchServices();
+      }
+    } catch (e) {
+      console.error('Error al eliminar el servicio:', e);
+    }
+  }
+
+  // Upload membership receipt
   async function handleUploadReceipt() {
     if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
       uploadError = 'Por favor selecciona la imagen de tu comprobante.';
@@ -78,7 +492,7 @@
     uploading = true;
     uploadError = '';
     uploadSuccess = '';
-    
+
     const formData = new FormData();
     formData.append('file', fileInput.files[0]);
 
@@ -109,6 +523,7 @@
 
 <svelte:head>
   <title>Dashboard Administrador - LavaApp</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
 </svelte:head>
 
 {#if loadingWash}
@@ -119,10 +534,12 @@
 {:else}
   <div class="dashboard-card">
     <div class="tab-content">
+      
+      <!-- 1. HOME TAB -->
       {#if navStore.activeTab === 'home'}
-        <div class="content-panel">
-          <h3 class="panel-subtitle">Panel de Control: Administrador</h3>
-          <p class="welcome-text">Gestión y control de operaciones del lavadero.</p>
+        <div class="content-panel animate-fade">
+          <h3 class="panel-subtitle">Resumen del Establecimiento</h3>
+          <p class="welcome-text font-outfit">Gestión y control de operaciones del lavadero.</p>
 
           {#if carWash && !carWash.isServiceActive}
             <div class="alert-box-inline">
@@ -130,20 +547,51 @@
               <div>
                 <h4 class="alert-title">Suscripción Inactiva</h4>
                 <p class="alert-description">
-                  Tu lavadero se encuentra desactivado y no figura públicamente.
-                  Realiza la transferencia y carga tu comprobante de pago en la pestaña <strong>Mi Membresía</strong> para activarlo.
+                  Tu lavadero se encuentra desactivado y no figura públicamente en las búsquedas de los clientes.
+                  Realiza la transferencia y carga tu comprobante de pago en la pestaña <strong>Settings</strong> para activarlo.
                 </p>
               </div>
             </div>
           {/if}
 
+          <div class="grid-stats">
+            <div class="stat-card">
+              <span class="stat-label">Operación Manual</span>
+              <span class="stat-value" class:text-active={carWash?.isManuallyOpen} class:text-inactive={!carWash?.isManuallyOpen}>
+                {carWash?.isManuallyOpen ? 'Abierto' : 'Cerrado'}
+              </span>
+              <span class="stat-desc">Controlado desde la pestaña Operations</span>
+            </div>
+            
+            <div class="stat-card">
+              <span class="stat-label">Visibilidad Pública</span>
+              <span class="stat-value" class:text-active={carWash?.isServiceActive} class:text-inactive={!carWash?.isServiceActive}>
+                {carWash?.isServiceActive ? 'Activo' : 'Inactivo'}
+              </span>
+              <span class="stat-desc">Estado de la Membresía</span>
+            </div>
+
+            <div class="stat-card">
+              <span class="stat-label">Servicios Activos</span>
+              <span class="stat-value highlight-green font-outfit">{servicesList.length}</span>
+              <span class="stat-desc">Servicios listados al cliente</span>
+            </div>
+
+            <div class="stat-card">
+              <span class="stat-label">Bahías Disponibles</span>
+              <span class="stat-value highlight font-outfit">{carWash?.baysCount || 1}</span>
+              <span class="stat-desc">Espacios de lavado físico</span>
+            </div>
+          </div>
+
           <div class="user-info-box">
+            <h4 class="section-title">Datos Administrativos</h4>
             <div class="info-row">
-              <span class="info-label">Nombre del Lavadero:</span>
-              <span class="info-value">{carWash?.name || 'Mi Lavadero'}</span>
+              <span class="info-label">Nombre del Establecimiento:</span>
+              <span class="info-value">{carWash?.name || 'Establecimiento sin nombre'}</span>
             </div>
             <div class="info-row">
-              <span class="info-label">Administrador:</span>
+              <span class="info-label">Dueño / Encargado:</span>
               <span class="info-value">{authStore.user?.name || 'Administrador'}</span>
             </div>
             <div class="info-row">
@@ -151,42 +599,209 @@
               <span class="info-value">{authStore.user?.email || 'N/A'}</span>
             </div>
             <div class="info-row">
-              <span class="info-label">Estado del Servicio:</span>
-              <span class="info-value" class:text-active={carWash?.isServiceActive} class:text-inactive={!carWash?.isServiceActive}>
-                {carWash?.isServiceActive ? 'Activo' : 'Inactivo'}
-              </span>
-            </div>
-            <div class="info-row">
               <span class="info-label">Membresía Vence:</span>
-              <span class="info-value highlight-green">
-                {carWash?.subscriptionExpiresAt ? new Date(carWash.subscriptionExpiresAt).toLocaleDateString() : 'N/A'}
+              <span class="info-value highlight-green font-outfit">
+                {carWash?.subscriptionExpiresAt ? new Date(carWash.subscriptionExpiresAt).toLocaleDateString() : 'Sin membresía activa'}
               </span>
             </div>
           </div>
         </div>
 
+      <!-- 2. OPERATIONS TAB -->
       {:else if navStore.activeTab === 'operations'}
-        <div class="content-panel">
-          <h3 class="panel-subtitle">Operaciones Activas</h3>
+        <div class="content-panel animate-fade">
+          <h3 class="panel-subtitle">Operations</h3>
           
           {#if carWash && !carWash.isServiceActive}
             <div class="alert-box">
               <span class="warning-icon">⚠️</span>
               <div>
                 <h4 class="alert-title">Acceso Restringido</h4>
-                <p class="alert-description">Esta sección requiere que tu membresía esté activa. Por favor, ve a la pestaña <strong>Mi Membresía</strong> para habilitar el servicio.</p>
+                <p class="alert-description">Esta sección requiere que tu membresía esté activa. Por favor, ve a la pestaña <strong>Settings</strong> para habilitar el servicio y gestionar las operaciones en tiempo real.</p>
               </div>
             </div>
           {:else}
-            <div class="admin-actions-placeholder">
-              <p>Supervisión y asignación de pedidos de lavandería, asignación de tareas de delivery y control de insumos en próximas fases.</p>
+            <p class="section-desc">Gestiona el estado operativo diario de tu establecimiento y atiende los pedidos.</p>
+
+            <div class="card-status-toggle">
+              <div class="status-toggle-info">
+                <h4 class="status-toggle-title">Control de Apertura y Cierre</h4>
+                <p class="status-toggle-desc">
+                  Este interruptor te permite abrir o cerrar tu local al instante. Si cierras el local, los clientes no podrán programar turnos inmediatamente, pero seguirán viendo tus fotos y ubicación. Si lo abres, el sistema habilitará automáticamente la reserva en tiempo real de tus bahías libres.
+                </p>
+                <div class="state-badge-container">
+                  <span class="badge-operation" class:open={carWash?.isManuallyOpen}>
+                    {carWash?.isManuallyOpen ? 'LAVADERO ABIERTO' : 'LAVADERO CERRADO'}
+                  </span>
+                </div>
+              </div>
+              <div class="status-toggle-action">
+                <label class="switch-container">
+                  <input type="checkbox" checked={carWash?.isManuallyOpen} onchange={handleToggleManualOpen} />
+                  <span class="switch-slider"></span>
+                </label>
+              </div>
+            </div>
+
+            <div class="admin-actions-placeholder" style="margin-top: 24px;">
+              <h5 class="info-label" style="color: #f1f5f9; font-weight: 600; margin-bottom: 8px;">Próxima Fase: Pedidos y Turnos</h5>
+              <p>Aquí se listarán las reservas del día asignadas a cada una de tus {carWash?.baysCount || 1} bahías físicas de lavado, permitiéndote cambiar estados y dar aviso al cliente cuando su vehículo esté listo.</p>
             </div>
           {/if}
         </div>
 
+      <!-- 3. VEHICLES TAB -->
+      {:else if navStore.activeTab === 'vehicles'}
+        <div class="content-panel animate-fade">
+          <h3 class="panel-subtitle">Vehículo</h3>
+          <p class="section-desc">Configura los tipos de vehículos que tu lavadero admite. Los servicios que ofrezcas deberán asociarse a alguno de los vehículos activos en esta lista.</p>
+
+          <div class="catalog-grid">
+            <div class="catalog-card">
+              <h4 class="payment-title">Catálogo de Vehículos Admitidos</h4>
+              
+              {#if loadingVehicles}
+                <div class="loading-box-inline">
+                  <div class="spinner-small"></div>
+                  <p>Cargando catálogo...</p>
+                </div>
+              {:else if vehiclesList.length === 0}
+                <p class="empty-history">No tienes vehículos configurados.</p>
+              {:else}
+                <div class="table-container">
+                  <table class="vehicles-table">
+                    <thead>
+                      <tr>
+                        <th>Vehículo</th>
+                        <th>Estado</th>
+                        <th>Acción</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {#each vehiclesList as vehicle}
+                        <tr>
+                          <td class="font-outfit" style="font-weight: 600; color: #f1f5f9;">{vehicle.name}</td>
+                          <td>
+                            <button 
+                              onclick={() => toggleVehicleActive(vehicle.id, vehicle.isActive)} 
+                              class="badge-status-btn"
+                              class:active={vehicle.isActive}
+                            >
+                              {vehicle.isActive ? 'Activo' : 'Inactivo'}
+                            </button>
+                          </td>
+                          <td>
+                            {#if vehicle.isCustom}
+                              <button onclick={() => handleDeleteVehicle(vehicle.id)} class="btn-action-danger" aria-label="Eliminar">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                              </button>
+                            {:else}
+                              <span class="text-muted" style="font-size: 11px;">Estándar</span>
+                            {/if}
+                          </td>
+                        </tr>
+                      {/each}
+                    </tbody>
+                  </table>
+                </div>
+              {/if}
+            </div>
+
+            <!-- Form Agregar Vehículo -->
+            <div class="catalog-card">
+              <h4 class="payment-title">Agregar Vehículo Personalizado</h4>
+              <p class="payment-subtitle">Crea un tipo de vehículo a la medida de tu negocio (ejemplo: "Cuatriciclo", "Colectivo", "Bicicleta").</p>
+
+              <div class="form-group">
+                <label for="new-veh-name" class="file-label">Nombre del Vehículo:</label>
+                <input 
+                  type="text" 
+                  id="new-veh-name" 
+                  placeholder="Ej: Acoplado" 
+                  bind:value={newVehicleName} 
+                  class="file-input" 
+                />
+                {#if vehicleError}
+                  <p class="error-msg">{vehicleError}</p>
+                {/if}
+                <button 
+                  onclick={handleAddVehicle} 
+                  disabled={addingVehicle || !newVehicleName.trim()} 
+                  class="btn-primary"
+                  style="margin-top: 16px;"
+                >
+                  {addingVehicle ? 'Agregando...' : 'Agregar al Catálogo'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      <!-- 4. SERVICES TAB -->
+      {:else if navStore.activeTab === 'services'}
+        <div class="content-panel animate-fade">
+          <div class="header-actions">
+            <h3 class="panel-subtitle">Servicio</h3>
+            {#if carWash?.isServiceActive}
+              <button onclick={openAddServiceModal} class="btn-add">
+                + Crear Servicio
+              </button>
+            {/if}
+          </div>
+
+          {#if carWash && !carWash.isServiceActive}
+            <div class="alert-box">
+              <span class="warning-icon">⚠️</span>
+              <div>
+                <h4 class="alert-title">Acceso Restringido</h4>
+                <p class="alert-description">Esta sección requiere que tu membresía esté activa. Por favor, ve a la pestaña <strong>Settings</strong> para habilitar el servicio y definir tus precios y servicios.</p>
+              </div>
+            </div>
+          {:else}
+            <p class="section-desc">Configura los precios, tipos de lavado y tiempos estimados según la categoría de vehículo admitida.</p>
+
+            {#if loadingServices}
+              <div class="loading-box-inline">
+                <div class="spinner-small"></div>
+                <p>Cargando servicios...</p>
+              </div>
+            {:else if servicesList.length === 0}
+              <div class="empty-state-box">
+                <p>Aún no has creado ningún servicio para tu lavadero.</p>
+                <button onclick={openAddServiceModal} class="btn-primary" style="max-width: 200px; margin: 12px auto 0;">Crear mi primer servicio</button>
+              </div>
+            {:else}
+              <div class="services-grid">
+                {#each servicesList as service}
+                  <div class="service-card">
+                    <div class="service-card-header">
+                      <span class="badge-veh">{service.vehicleType}</span>
+                      <span class="service-price font-outfit">${service.price} ARS</span>
+                    </div>
+                    <h4 class="service-name font-outfit">{service.name}</h4>
+                    <p class="service-desc">{service.description || 'Sin descripción'}</p>
+                    <div class="service-card-footer">
+                      <span class="service-duration">⏱️ {service.durationMinutes} min</span>
+                      <div class="service-actions">
+                        <button onclick={() => openEditServiceModal(service)} class="btn-action-edit" aria-label="Editar">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+                        </button>
+                        <button onclick={() => handleDeleteService(service.id)} class="btn-action-danger" aria-label="Eliminar">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          {/if}
+        </div>
+
+      <!-- 5. MEMBERSHIP TAB (Settings) -->
       {:else if navStore.activeTab === 'membership'}
-        <div class="content-panel">
-          <h3 class="panel-subtitle">Gestión de Membresía</h3>
+        <div class="content-panel animate-fade">
+          <h3 class="panel-subtitle">Settings (Membresía)</h3>
           <p class="section-desc">Consulta los datos para tu membresía mensual, sube comprobantes de transferencia o revisa tu historial de pagos.</p>
 
           <div class="membership-layout">
@@ -272,12 +887,218 @@
             </div>
           </div>
         </div>
+
+      <!-- 6. WASH-SETTINGS TAB -->
+      {:else if navStore.activeTab === 'wash-settings'}
+        <div class="content-panel animate-fade">
+          <h3 class="panel-subtitle">wash Settings</h3>
+          <p class="section-desc">Configura los datos comerciales del local, gestiona la galería de fotos y ubica con precisión tu local en el mapa para que lo vean los clientes.</p>
+
+          <div class="settings-container">
+            <div class="settings-form-card">
+              <h4 class="payment-title">Datos Comerciales</h4>
+              
+              <div class="form-group">
+                <label for="wash-name-input" class="file-label">Nombre Comercial del Lavadero:</label>
+                <input 
+                  type="text" 
+                  id="wash-name-input" 
+                  placeholder="Ej: CarWash Tucumán" 
+                  bind:value={washName} 
+                  class="file-input" 
+                />
+              </div>
+
+              <div class="form-group">
+                <label for="wash-alias-input" class="file-label">CBU / CVU o Alias de cobro para clientes:</label>
+                <input 
+                  type="text" 
+                  id="wash-alias-input" 
+                  placeholder="Ej: lavadero.cobros" 
+                  bind:value={washPaymentAlias} 
+                  class="file-input" 
+                />
+              </div>
+
+              <div class="form-group">
+                <label for="wash-bays-input" class="file-label">Cantidad de Bahías de Lavado Simultáneas:</label>
+                <input 
+                  type="number" 
+                  id="wash-bays-input" 
+                  min="1" 
+                  max="20" 
+                  bind:value={washBaysCount} 
+                  class="file-input" 
+                />
+              </div>
+
+              <h4 class="payment-title" style="margin-top: 24px;">Ubicación en Mapa</h4>
+              <p class="payment-subtitle">Escribe tu dirección para buscar en el mapa, o arrastra el marcador hasta la ubicación exacta de tu establecimiento.</p>
+
+              <div class="search-address-row">
+                <input 
+                  type="text" 
+                  placeholder="Ej: Av. Mate de Luna 2000" 
+                  bind:value={searchAddress} 
+                  class="file-input" 
+                  onkeydown={(e) => e.key === 'Enter' && handleGeocodeSearch()}
+                />
+                <button onclick={handleGeocodeSearch} disabled={searchingGeocode} class="btn-search">
+                  {searchingGeocode ? 'Buscando...' : 'Buscar'}
+                </button>
+              </div>
+
+              {#if geocodingResults.length > 0}
+                <div class="search-results-box">
+                  {#each geocodingResults as result}
+                    <button onclick={() => selectGeocodeResult(result)} class="search-result-item">
+                      📍 {result.display_name}
+                    </button>
+                  {/each}
+                </div>
+              {/if}
+
+              <div class="map-coordinates font-outfit">
+                <span>Latitud: {washLat.toFixed(6)}</span> | <span>Longitud: {washLng.toFixed(6)}</span>
+              </div>
+
+              <div id="map" class="map-container"></div>
+
+              {#if saveSettingsError}
+                <p class="error-msg">{saveSettingsError}</p>
+              {/if}
+              {#if saveSettingsSuccess}
+                <p class="success-msg">{saveSettingsSuccess}</p>
+              {/if}
+
+              <button 
+                onclick={saveWashSettings} 
+                disabled={savingWashSettings} 
+                class="btn-primary"
+                style="margin-top: 24px;"
+              >
+                {savingWashSettings ? 'Guardando...' : 'Guardar Información de Perfil'}
+              </button>
+            </div>
+
+            <!-- Galería de Fotos del Local -->
+            <div class="settings-form-card">
+              <h4 class="payment-title">Galería de Fotos del Local</h4>
+              <p class="payment-subtitle font-outfit">Sube hasta varias fotos de tus instalaciones para captar la atención de tus clientes.</p>
+
+              <div class="upload-photos-box">
+                <label for="photos-upload-input" class="file-label">Subir fotos (selecciona una o más):</label>
+                <input 
+                  type="file" 
+                  id="photos-upload-input" 
+                  accept="image/*" 
+                  multiple 
+                  bind:this={photosFileInput} 
+                  onchange={handleUploadWashPhotos}
+                  class="file-input" 
+                />
+                {#if uploadingPhotos}
+                  <div class="loading-box-inline" style="margin-top: 10px;">
+                    <div class="spinner-small"></div>
+                    <p>Subiendo fotos...</p>
+                  </div>
+                {/if}
+                {#if uploadPhotosError}
+                  <p class="error-msg">{uploadPhotosError}</p>
+                {/if}
+              </div>
+
+              <h5 class="gallery-title font-outfit">Fotos cargadas</h5>
+              {#if !carWash?.photos || carWash.photos.length === 0}
+                <p class="empty-history" style="text-align: center; margin: 32px 0;">No tienes fotos subidas.</p>
+              {:else}
+                <div class="photos-grid">
+                  {#each carWash.photos as photo}
+                    <div class="photo-card">
+                      <img src={`${apiConfig.baseUrl}${photo.photoUrl}`} alt="Foto del lavadero" class="photo-img" />
+                      <button onclick={() => handleDeletePhoto(photo.id)} class="btn-delete-photo" aria-label="Eliminar Foto">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                      </button>
+                    </div>
+                  {/each}
+                </div>
+              {/if}
+            </div>
+          </div>
+        </div>
       {/if}
+
+    </div>
+  </div>
+{/if}
+
+<!-- MODAL CREAR / EDITAR SERVICIO -->
+{#if showServiceModal}
+  <div class="modal-overlay">
+    <div class="modal-content animate-fade">
+      <div class="modal-header">
+        <h4 class="payment-title" style="margin: 0;">{editingServiceId ? 'Editar Servicio' : 'Crear Nuevo Servicio'}</h4>
+        <button onclick={() => showServiceModal = false} class="close-modal-btn">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="srv-name" class="file-label">Nombre del Servicio:</label>
+          <input type="text" id="srv-name" placeholder="Ej: Lavado Premium" bind:value={serviceForm.name} class="file-input" />
+        </div>
+        <div class="form-group">
+          <label for="srv-desc" class="file-label">Descripción del Servicio:</label>
+          <textarea id="srv-desc" rows="3" placeholder="Ej: Lavado de carrocería, aspirado completo y perfumado" bind:value={serviceForm.description} class="file-input" style="resize: vertical;"></textarea>
+        </div>
+        
+        <div class="form-group">
+          <label for="srv-veh" class="file-label">Tipo de Vehículo Asociado:</label>
+          <select id="srv-veh" bind:value={serviceForm.vehicleType} class="file-input" style="background-color: #0f172a;">
+            {#if activeVehicles.length === 0}
+              <option value="">No hay vehículos activos. Habilita uno en la pestaña Vehículo.</option>
+            {:else}
+              {#each activeVehicles as v}
+                <option value={v.name}>{v.name}</option>
+              {/each}
+            {/if}
+          </select>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="srv-dur" class="file-label">Duración (minutos):</label>
+            <input type="number" id="srv-dur" min="5" max="300" bind:value={serviceForm.durationMinutes} class="file-input" />
+          </div>
+          <div class="form-group">
+            <label for="srv-price" class="file-label">Precio ($ ARS):</label>
+            <input type="number" id="srv-price" min="0" bind:value={serviceForm.price} class="file-input" />
+          </div>
+        </div>
+
+        {#if serviceError}
+          <p class="error-msg">{serviceError}</p>
+        {/if}
+      </div>
+      <div class="modal-footer">
+        <button onclick={() => showServiceModal = false} class="btn-secondary">Cancelar</button>
+        <button onclick={saveService} disabled={savingService || activeVehicles.length === 0} class="btn-primary" style="margin-top:0; width:auto;">
+          {savingService ? 'Guardando...' : 'Guardar Servicio'}
+        </button>
+      </div>
     </div>
   </div>
 {/if}
 
 <style>
+  /* --- BASE Y GENERALES --- */
+  .animate-fade {
+    animation: fadeIn 0.3s ease-out;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
   .loading-container {
     display: flex;
     flex-direction: column;
@@ -313,17 +1134,18 @@
   }
 
   .alert-box {
-    background: rgba(239, 68, 68, 0.1);
+    background: rgba(239, 68, 68, 0.08);
     border: 1px solid rgba(239, 68, 68, 0.25);
     border-radius: 12px;
     padding: 16px 20px;
     display: flex;
     gap: 16px;
     align-items: flex-start;
+    margin-bottom: 20px;
   }
 
   .alert-box-inline {
-    background: rgba(245, 158, 11, 0.08);
+    background: rgba(245, 158, 11, 0.06);
     border: 1px solid rgba(245, 158, 11, 0.25);
     border-radius: 12px;
     padding: 16px 20px;
@@ -331,7 +1153,6 @@
     gap: 16px;
     align-items: flex-start;
     margin-bottom: 24px;
-    max-width: 500px;
   }
 
   .warning-icon {
@@ -351,6 +1172,633 @@
     font-size: 14px;
     line-height: 1.5;
     color: #cbd5e1;
+  }
+
+  .dashboard-card {
+    box-sizing: border-box;
+    font-family: 'Inter', sans-serif;
+    padding: 0;
+  }
+
+  .content-panel {
+    padding: 16px 0;
+    line-height: 1.6;
+    color: #cbd5e1;
+  }
+
+  .panel-subtitle {
+    margin: 0 0 8px 0;
+    font-size: 26px;
+    color: #f1f5f9;
+    font-family: 'Outfit', sans-serif;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+  }
+
+  .welcome-text {
+    font-size: 16px;
+    color: #94a3b8;
+    margin-bottom: 24px;
+  }
+
+  .section-desc {
+    font-size: 14px;
+    color: #94a3b8;
+    margin-bottom: 24px;
+    max-width: 800px;
+  }
+
+  .section-title {
+    margin: 0 0 16px 0;
+    font-size: 16px;
+    font-weight: 700;
+    color: #f1f5f9;
+    font-family: 'Outfit', sans-serif;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    padding-bottom: 8px;
+  }
+
+  /* --- HOME STATS GRID --- */
+  .grid-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+    margin-bottom: 32px;
+  }
+
+  .stat-card {
+    background: rgba(30, 41, 59, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 16px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    backdrop-filter: blur(8px);
+  }
+
+  .stat-label {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #64748b;
+    font-weight: 700;
+  }
+
+  .stat-value {
+    font-size: 28px;
+    font-weight: 800;
+    color: #f1f5f9;
+  }
+
+  .stat-desc {
+    font-size: 11px;
+    color: #64748b;
+  }
+
+  .user-info-box {
+    background: rgba(15, 23, 42, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 16px;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-width: 600px;
+  }
+
+  .info-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+    padding-bottom: 8px;
+  }
+
+  .info-label {
+    color: #94a3b8;
+  }
+
+  .info-value {
+    color: #f1f5f9;
+    font-weight: 500;
+  }
+
+  .text-active {
+    color: #10b981;
+    font-weight: 700;
+  }
+
+  .text-inactive {
+    color: #ef4444;
+    font-weight: 700;
+  }
+
+  .highlight-green {
+    color: #34d399;
+    font-weight: 700;
+  }
+
+  .highlight {
+    color: #60a5fa;
+    font-weight: 700;
+  }
+
+  /* --- OPERATIONS MANAGE CARD --- */
+  .card-status-toggle {
+    background: rgba(30, 41, 59, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 20px;
+    padding: 32px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 24px;
+    max-width: 800px;
+    backdrop-filter: blur(10px);
+  }
+
+  .status-toggle-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .status-toggle-title {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 700;
+    color: #f1f5f9;
+    font-family: 'Outfit', sans-serif;
+  }
+
+  .status-toggle-desc {
+    margin: 0;
+    font-size: 13px;
+    color: #94a3b8;
+    line-height: 1.6;
+  }
+
+  .state-badge-container {
+    margin-top: 8px;
+  }
+
+  .badge-operation {
+    font-size: 11px;
+    font-weight: 800;
+    padding: 4px 12px;
+    border-radius: 20px;
+    letter-spacing: 0.5px;
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.25);
+  }
+
+  .badge-operation.open {
+    background: rgba(16, 185, 129, 0.15);
+    color: #10b981;
+    border: 1px solid rgba(16, 185, 129, 0.25);
+  }
+
+  /* SWITCH TOGGLE STYLES */
+  .switch-container {
+    position: relative;
+    display: inline-block;
+    width: 68px;
+    height: 36px;
+    flex-shrink: 0;
+  }
+
+  .switch-container input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+
+  .switch-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #334155;
+    transition: .4s;
+    border-radius: 36px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .switch-slider:before {
+    position: absolute;
+    content: "";
+    height: 28px;
+    width: 28px;
+    left: 3px;
+    bottom: 3px;
+    background-color: #94a3b8;
+    transition: .4s;
+    border-radius: 50%;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+  }
+
+  .switch-container input:checked + .switch-slider {
+    background-color: #2563eb;
+  }
+
+  .switch-container input:checked + .switch-slider:before {
+    transform: translateX(32px);
+    background-color: #ffffff;
+  }
+
+  .admin-actions-placeholder {
+    font-size: 13px;
+    color: #94a3b8;
+    line-height: 1.6;
+    border-left: 3px solid #3b82f6;
+    padding-left: 16px;
+    max-width: 800px;
+  }
+
+  /* --- VEHICLES & CATALOGUE --- */
+  .catalog-grid {
+    display: grid;
+    grid-template-columns: 1.2fr 0.8fr;
+    gap: 32px;
+    align-items: start;
+  }
+
+  .catalog-card {
+    background: rgba(30, 41, 59, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 20px;
+    padding: 24px;
+    backdrop-filter: blur(10px);
+  }
+
+  .table-container {
+    overflow-x: auto;
+    margin-top: 16px;
+  }
+
+  .vehicles-table {
+    width: 100%;
+    border-collapse: collapse;
+    text-align: left;
+    font-size: 13px;
+  }
+
+  .vehicles-table th {
+    color: #64748b;
+    font-weight: 700;
+    padding: 12px 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .vehicles-table td {
+    padding: 14px 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    vertical-align: middle;
+  }
+
+  .badge-status-btn {
+    font-size: 11px;
+    font-weight: 700;
+    border: none;
+    border-radius: 6px;
+    padding: 3px 8px;
+    cursor: pointer;
+    background: rgba(148, 163, 184, 0.15);
+    color: #94a3b8;
+    transition: all 0.2s ease;
+  }
+
+  .badge-status-btn.active {
+    background: rgba(16, 185, 129, 0.15);
+    color: #10b981;
+  }
+
+  .btn-action-danger {
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.2);
+    border-radius: 6px;
+    padding: 6px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+  }
+
+  .btn-action-danger:hover {
+    background: #ef4444;
+    color: #ffffff;
+  }
+
+  .text-muted {
+    color: #64748b;
+  }
+
+  /* --- SERVICES TAB --- */
+  .header-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+  }
+
+  .btn-add {
+    background: linear-gradient(90deg, #2563eb, #1d4ed8);
+    border: none;
+    border-radius: 8px;
+    color: #ffffff;
+    cursor: pointer;
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 10px 20px;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+    transition: all 0.2s ease;
+  }
+
+  .btn-add:hover {
+    background: linear-gradient(90deg, #3b82f6, #2563eb);
+    transform: translateY(-1px);
+  }
+
+  .services-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 24px;
+  }
+
+  .service-card {
+    background: rgba(30, 41, 59, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 16px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    position: relative;
+    backdrop-filter: blur(8px);
+    transition: transform 0.2s ease, border-color 0.2s ease;
+  }
+
+  .service-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+
+  .service-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .badge-veh {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    background: rgba(59, 130, 246, 0.1);
+    color: #60a5fa;
+    border: 1px solid rgba(59, 130, 246, 0.2);
+    padding: 2px 8px;
+    border-radius: 6px;
+  }
+
+  .service-price {
+    font-size: 16px;
+    font-weight: 800;
+    color: #34d399;
+  }
+
+  .service-name {
+    margin: 0;
+    font-size: 17px;
+    font-weight: 700;
+    color: #f1f5f9;
+  }
+
+  .service-desc {
+    margin: 0;
+    font-size: 13px;
+    color: #94a3b8;
+    line-height: 1.5;
+    flex-grow: 1;
+  }
+
+  .service-card-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-top: 1px solid rgba(255, 255, 255, 0.03);
+    padding-top: 12px;
+    margin-top: 4px;
+  }
+
+  .service-duration {
+    font-size: 12px;
+    color: #64748b;
+    font-weight: 600;
+  }
+
+  .service-actions {
+    display: flex;
+    gap: 8px;
+  }
+
+  .btn-action-edit {
+    background: rgba(255, 255, 255, 0.05);
+    color: #cbd5e1;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    padding: 6px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+  }
+
+  .btn-action-edit:hover {
+    background: rgba(255, 255, 255, 0.15);
+    color: #f1f5f9;
+  }
+
+  .empty-state-box {
+    text-align: center;
+    padding: 48px;
+    background: rgba(30, 41, 59, 0.1);
+    border: 1px dashed rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    color: #64748b;
+  }
+
+  /* --- WASH SETTINGS TAB --- */
+  .settings-container {
+    display: grid;
+    grid-template-columns: 1.1fr 0.9fr;
+    gap: 32px;
+    align-items: start;
+  }
+
+  .settings-form-card {
+    background: rgba(30, 41, 59, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 20px;
+    padding: 28px;
+    backdrop-filter: blur(10px);
+  }
+
+  .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 18px;
+  }
+
+  .form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+
+  .search-address-row {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+
+  .btn-search {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: #cbd5e1;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 16px;
+    transition: all 0.2s ease;
+  }
+
+  .btn-search:hover {
+    background: rgba(255, 255, 255, 0.15);
+    color: #f1f5f9;
+  }
+
+  .search-results-box {
+    background: #0f172a;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    max-height: 180px;
+    overflow-y: auto;
+    margin-bottom: 14px;
+  }
+
+  .search-result-item {
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    padding: 10px 14px;
+    color: #94a3b8;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .search-result-item:hover {
+    background: rgba(255, 255, 255, 0.03);
+    color: #f1f5f9;
+  }
+
+  .map-coordinates {
+    font-size: 12px;
+    color: #64748b;
+    margin-bottom: 12px;
+  }
+
+  .map-container {
+    height: 320px;
+    width: 100%;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    margin-top: 12px;
+    overflow: hidden;
+    z-index: 10;
+  }
+
+  .upload-photos-box {
+    background: rgba(15, 23, 42, 0.25);
+    border: 1px dashed rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 24px;
+  }
+
+  .gallery-title {
+    margin: 0 0 16px 0;
+    font-size: 15px;
+    font-weight: 700;
+    color: #f1f5f9;
+  }
+
+  .photos-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 16px;
+  }
+
+  .photo-card {
+    position: relative;
+    border-radius: 12px;
+    overflow: hidden;
+    aspect-ratio: 4/3;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+  }
+
+  .photo-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .btn-delete-photo {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    background: rgba(15, 23, 42, 0.85);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: #ef4444;
+    border-radius: 50%;
+    width: 26px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    backdrop-filter: blur(4px);
+    transition: all 0.2s ease;
+  }
+
+  .btn-delete-photo:hover {
+    background: #ef4444;
+    color: #ffffff;
+    transform: scale(1.1);
+  }
+
+  /* --- MEMBERSHIP PANEL (Settings) --- */
+  .membership-layout {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 32px;
+    align-items: start;
+    margin-top: 16px;
   }
 
   .payment-card-static {
@@ -511,91 +1959,6 @@
     box-shadow: none;
   }
 
-  /* --- DASHBOARD ACTIVO --- */
-  .dashboard-card {
-    box-sizing: border-box;
-    font-family: 'Inter', sans-serif;
-    padding: 0;
-  }
-
-  .content-panel {
-    padding: 16px 0;
-    line-height: 1.6;
-    color: #cbd5e1;
-  }
-
-  .panel-subtitle {
-    margin: 0 0 4px 0;
-    font-size: 22px;
-    color: #f1f5f9;
-    font-family: 'Outfit', sans-serif;
-  }
-
-  .welcome-text {
-    font-size: 15px;
-    color: #94a3b8;
-    margin-bottom: 24px;
-  }
-
-  .user-info-box {
-    background: rgba(15, 23, 42, 0.25);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 8px;
-    padding: 16px 20px;
-    margin-bottom: 24px;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    max-width: 500px;
-  }
-
-  .info-row {
-    display: flex;
-    justify-content: space-between;
-    font-size: 14px;
-  }
-
-  .info-label {
-    color: #94a3b8;
-  }
-
-  .info-value {
-    color: #f1f5f9;
-    font-weight: 500;
-  }
-
-  .text-active {
-    color: #10b981;
-    font-weight: 600;
-  }
-
-  .text-inactive {
-    color: #ef4444;
-    font-weight: 600;
-  }
-
-  .highlight-green {
-    color: #34d399;
-    font-weight: 600;
-  }
-
-  .admin-actions-placeholder {
-    font-size: 14px;
-    color: #94a3b8;
-    line-height: 1.6;
-    border-left: 3px solid #3b82f6;
-    padding-left: 16px;
-  }
-
-  /* Membership Section Grid Layout */
-  .membership-layout {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 32px;
-    align-items: start;
-    margin-top: 16px;
-  }
-
   .history-card {
     background: rgba(30, 41, 59, 0.25);
     border: 1px solid rgba(255, 255, 255, 0.05);
@@ -682,16 +2045,102 @@
     border: 1px solid rgba(239, 68, 68, 0.3);
   }
 
-  .section-desc {
-    font-size: 13px;
-    color: #94a3b8;
-    margin-bottom: 24px;
+  /* --- MODAL DIALOGS --- */
+  .modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(6px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 3000;
+    padding: 16px;
   }
 
+  .modal-content {
+    background: #1e293b;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 20px;
+    width: 100%;
+    max-width: 520px;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+  }
+
+  .modal-header {
+    padding: 20px 24px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .close-modal-btn {
+    background: transparent;
+    border: none;
+    color: #64748b;
+    font-size: 20px;
+    cursor: pointer;
+    transition: color 0.15s ease;
+  }
+
+  .close-modal-btn:hover {
+    color: #f1f5f9;
+  }
+
+  .modal-body {
+    padding: 24px;
+    overflow-y: auto;
+    max-height: 70vh;
+  }
+
+  .modal-footer {
+    padding: 16px 24px;
+    background: rgba(15, 23, 42, 0.2);
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+  }
+
+  .btn-secondary {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: #cbd5e1;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 10px 20px;
+    transition: all 0.2s ease;
+  }
+
+  .btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: #f1f5f9;
+  }
+
+  /* --- RESPONSIVE MEDIA --- */
   @media (max-width: 900px) {
-    .membership-layout {
+    .membership-layout, .catalog-grid, .settings-container {
       grid-template-columns: 1fr;
       gap: 24px;
+    }
+
+    .card-status-toggle {
+      flex-direction: column;
+      align-items: flex-start;
+      padding: 20px;
+    }
+
+    .switch-container {
+      align-self: flex-end;
     }
   }
 </style>

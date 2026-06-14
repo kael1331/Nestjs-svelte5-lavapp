@@ -3,6 +3,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import { User } from '../../users/entities/user.entity';
 import { CarWashBay } from './car-wash-bay.entity';
 import { AdminSubscription } from './admin-subscription.entity';
+import { CarWashPhoto } from './car-wash-photo.entity';
 
 @Entity('car_washes')
 export class CarWash {
@@ -55,4 +56,8 @@ export class CarWash {
 
   @OneToMany(() => AdminSubscription, (sub) => sub.carWash)
   subscriptions: AdminSubscription[];
+
+  @OneToMany(() => CarWashPhoto, (photo) => photo.carWash)
+  @ApiProperty({ type: () => [CarWashPhoto], description: 'Fotos de la galería del establecimiento', required: false })
+  photos: CarWashPhoto[];
 }
