@@ -58,6 +58,7 @@ export class CarWashesController {
       longitude?: number;
       clientPaymentAlias?: string;
       isManuallyOpen?: boolean;
+      openingMode?: string;
       baysCount?: number;
     },
     @Req() req: any,

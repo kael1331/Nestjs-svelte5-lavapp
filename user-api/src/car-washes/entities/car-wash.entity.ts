@@ -43,6 +43,10 @@ export class CarWash {
   @ApiProperty({ description: 'Botón manual de apertura: abierto (true) o cerrado (false)' })
   isManuallyOpen: boolean;
 
+  @Column({ length: 20, default: 'automatic' })
+  @ApiProperty({ description: 'Modo de apertura del establecimiento: automatic (según horario laboral) o manual', default: 'automatic' })
+  openingMode: string;
+
   @Column({ default: false })
   @ApiProperty({ description: 'Estado controlado por la suscripción y el Superadmin (activo o inactivo)' })
   isServiceActive: boolean; // Renombrado a isServiceActive para evitar colisión con is_active en TypeORM si es necesario, o keep isActive. Let's use isServiceActive.

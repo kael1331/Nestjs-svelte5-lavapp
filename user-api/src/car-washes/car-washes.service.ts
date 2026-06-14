@@ -73,6 +73,7 @@ export class CarWashesService {
     longitude?: number;
     clientPaymentAlias?: string;
     isManuallyOpen?: boolean;
+    openingMode?: string;
     baysCount?: number;
   }): Promise<CarWash> {
     const wash = await this.getWashByAdmin(adminId);
@@ -110,6 +111,7 @@ export class CarWashesService {
     if (updateDto.longitude !== undefined) wash.longitude = updateDto.longitude;
     if (updateDto.clientPaymentAlias !== undefined) wash.clientPaymentAlias = updateDto.clientPaymentAlias;
     if (updateDto.isManuallyOpen !== undefined) wash.isManuallyOpen = updateDto.isManuallyOpen;
+    if (updateDto.openingMode !== undefined) wash.openingMode = updateDto.openingMode;
 
     // Guardar usando update parcial para evitar que TypeORM intente sincronizar la relación OneToMany
     await this.carWashRepository.update(wash.id, {
@@ -118,6 +120,7 @@ export class CarWashesService {
       longitude: wash.longitude,
       clientPaymentAlias: wash.clientPaymentAlias,
       isManuallyOpen: wash.isManuallyOpen,
+      openingMode: wash.openingMode,
       baysCount: wash.baysCount,
     });
 

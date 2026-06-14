@@ -61,6 +61,93 @@
   let savingService = $state(false);
   let serviceError = $state('');
 
+  // Schedules and Exceptions state for computing live status
+  let schedulesList = $state<any[]>([]);
+  let exceptionsList = $state<any[]>([]);
+
+  async function fetchSchedules() {
+    try {
+      const res = await fetch(`${apiConfig.baseUrl}/schedules`, {
+        headers: { 'Authorization': `Bearer ${authStore.token}` }
+      });
+      if (res.ok) {
+        schedulesList = await res.json();
+      }
+    } catch (e) {
+      console.error('Error fetching schedules:', e);
+    }
+  }
+
+  async function fetchExceptions() {
+    try {
+      const res = await fetch(`${apiConfig.baseUrl}/schedules/exceptions`, {
+        headers: { 'Authorization': `Bearer ${authStore.token}` }
+      });
+      if (res.ok) {
+        exceptionsList = await res.json();
+      }
+    } catch (e) {
+      console.error('Error fetching exceptions:', e);
+    }
+  }
+
+  function isCurrentlyWorkingTime(): boolean {
+    if (schedulesList.length === 0) return false;
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const localDateStr = `${yyyy}-${mm}-${dd}`;
+
+    const hasException = exceptionsList.some(exc => exc.date === localDateStr);
+    if (hasException) return false;
+
+    const dayOfWeek = now.getDay();
+    const daySchedules = schedulesList.filter(s => s.dayOfWeek === dayOfWeek);
+    if (daySchedules.length === 0) return false;
+
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    for (const sched of daySchedules) {
+      const startParts = sched.startTime.split(':');
+      const startMins = parseInt(startParts[0], 10) * 60 + parseInt(startParts[1], 10);
+      const endParts = sched.endTime.split(':');
+      const endMins = parseInt(endParts[0], 10) * 60 + parseInt(endParts[1], 10);
+      if (currentMinutes >= startMins && currentMinutes <= endMins) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function computedIsOpen(): boolean {
+    if (!carWash) return false;
+    const mode = carWash.openingMode || 'automatic';
+    if (mode === 'manual') {
+      return carWash.isManuallyOpen;
+    }
+    return isCurrentlyWorkingTime() && carWash.isManuallyOpen;
+  }
+
+  async function handleToggleOpeningMode(mode: string) {
+    if (!carWash) return;
+    try {
+      const res = await fetch(`${apiConfig.baseUrl}/car-washes/my-wash`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authStore.token}`
+        },
+        body: JSON.stringify({ openingMode: mode })
+      });
+      if (res.ok) {
+        carWash.openingMode = mode;
+        await fetchWashStatus();
+      }
+    } catch (e) {
+      console.error('Error updating opening mode:', e);
+    }
+  }
+
   async function fetchWashStatus() {
     try {
       loadingWash = true;
@@ -153,6 +240,17 @@
     await fetchSubscriptions();
     await fetchVehicles();
     await fetchServices();
+    if (carWash && carWash.isServiceActive) {
+      await fetchSchedules();
+      await fetchExceptions();
+    }
+  });
+
+  $effect(() => {
+    if (carWash?.isServiceActive && schedulesList.length === 0) {
+      fetchSchedules();
+      fetchExceptions();
+    }
   });
 
   const latestSub = $derived(
@@ -625,21 +723,57 @@
 
             <div class="card-status-toggle">
               <div class="status-toggle-info">
-                <h4 class="status-toggle-title">Control de Apertura y Cierre</h4>
+                <h4 class="status-toggle-title">Configuración de Estado en Tiempo Real</h4>
                 <p class="status-toggle-desc">
-                  Este interruptor te permite abrir o cerrar tu local al instante. Si cierras el local, los clientes no podrán programar turnos inmediatamente, pero seguirán viendo tus fotos y ubicación. Si lo abres, el sistema habilitará automáticamente la reserva en tiempo real de tus bahías libres.
+                  Define cómo se calcula si tu local figura Abierto o Cerrado en este instante. Esto sirve como indicación visual en tiempo real para los clientes, <strong>pero nunca bloqueará la solicitud de turnos a futuro</strong>, las cuales se rigen únicamente por tus horarios laborales, días laborales y excepciones.
                 </p>
-                <div class="state-badge-container">
-                  <span class="badge-operation" class:open={carWash?.isManuallyOpen}>
-                    {carWash?.isManuallyOpen ? 'LAVADERO ABIERTO' : 'LAVADERO CERRADO'}
+
+                <!-- Selector de Modo de Apertura -->
+                <div class="opening-mode-selector" style="margin-top: 18px; display: flex; flex-wrap: wrap; gap: 16px;">
+                  <label class="radio-label">
+                    <input 
+                      type="radio" 
+                      name="openingMode" 
+                      value="automatic" 
+                      checked={carWash?.openingMode === 'automatic'} 
+                      onchange={() => handleToggleOpeningMode('automatic')} 
+                    />
+                    <span style="font-size: 13px; font-weight: 500; color: #e2e8f0; cursor: pointer;">⏱️ Modo Automático (según horario laboral)</span>
+                  </label>
+                  <label class="radio-label">
+                    <input 
+                      type="radio" 
+                      name="openingMode" 
+                      value="manual" 
+                      checked={carWash?.openingMode === 'manual'} 
+                      onchange={() => handleToggleOpeningMode('manual')} 
+                    />
+                    <span style="font-size: 13px; font-weight: 500; color: #e2e8f0; cursor: pointer;">🎮 Modo Manual (por interruptor)</span>
+                  </label>
+                </div>
+
+                <div class="state-badge-container" style="margin-top: 20px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                  <span class="badge-operation" class:open={computedIsOpen()}>
+                    {computedIsOpen() ? 'ESTADO ACTUAL: ABIERTO' : 'ESTADO ACTUAL: CERRADO'}
                   </span>
+                  
+                  {#if carWash?.openingMode === 'automatic'}
+                    <span style="font-size: 12px; color: #94a3b8; font-weight: 500;">
+                      {isCurrentlyWorkingTime() 
+                        ? '🟢 Dentro del horario de atención laboral' 
+                        : '🔴 Fuera del horario de atención laboral'}
+                      {(!carWash.isManuallyOpen && isCurrentlyWorkingTime()) ? ' (Forzado a Cerrado)' : ''}
+                    </span>
+                  {/if}
                 </div>
               </div>
-              <div class="status-toggle-action">
+
+              <div class="status-toggle-action" style="display: flex; flex-direction: column; align-items: center; gap: 6px;">
                 <label class="switch-container">
                   <input type="checkbox" checked={carWash?.isManuallyOpen} onchange={handleToggleManualOpen} />
                   <span class="switch-slider"></span>
                 </label>
+                <span style="font-size: 11px; color: #64748b; font-weight: 700; text-transform: uppercase;">Interruptor Manual</span>
               </div>
             </div>
 
@@ -2142,5 +2276,19 @@
     .switch-container {
       align-self: flex-end;
     }
+  }
+
+  .radio-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+  }
+
+  .radio-label input[type="radio"] {
+    accent-color: #3b82f6;
+    cursor: pointer;
+    width: 16px;
+    height: 16px;
   }
 </style>
