@@ -69,6 +69,7 @@ export class CarWashesService {
 
   async updateWash(adminId: number, updateDto: {
     name?: string;
+    address?: string;
     latitude?: number;
     longitude?: number;
     clientPaymentAlias?: string;
@@ -107,6 +108,7 @@ export class CarWashesService {
 
     // Actualizar el resto de campos
     if (updateDto.name !== undefined) wash.name = updateDto.name;
+    if (updateDto.address !== undefined) wash.address = updateDto.address;
     if (updateDto.latitude !== undefined) wash.latitude = updateDto.latitude;
     if (updateDto.longitude !== undefined) wash.longitude = updateDto.longitude;
     if (updateDto.clientPaymentAlias !== undefined) wash.clientPaymentAlias = updateDto.clientPaymentAlias;
@@ -116,6 +118,7 @@ export class CarWashesService {
     // Guardar usando update parcial para evitar que TypeORM intente sincronizar la relación OneToMany
     await this.carWashRepository.update(wash.id, {
       name: wash.name,
+      address: wash.address,
       latitude: wash.latitude,
       longitude: wash.longitude,
       clientPaymentAlias: wash.clientPaymentAlias,

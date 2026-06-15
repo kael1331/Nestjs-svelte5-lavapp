@@ -12,8 +12,8 @@ export const MENU_ITEMS: MenuItem[] = [
   { id: 'operations', label: 'Operations', roles: ['admin'] },
   { id: 'vehicles', label: 'Vehículo', roles: ['admin'] },
   { id: 'services', label: 'Servicio', roles: ['admin'] },
-  { id: 'membership', label: 'Settings', roles: ['admin'] },
-  { id: 'wash-settings', label: 'wash Settings', roles: ['admin'] },
+  { id: 'membership', label: 'Membresía', roles: ['admin'] },
+  { id: 'wash-settings', label: 'Configuración', roles: ['admin'] },
   { id: 'orders', label: 'Mis Pedidos', roles: ['client'] },
 ];
 

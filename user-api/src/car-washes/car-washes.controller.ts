@@ -54,6 +54,7 @@ export class CarWashesController {
   updateMyWash(
     @Body() updateDto: {
       name?: string;
+      address?: string;
       latitude?: number;
       longitude?: number;
       clientPaymentAlias?: string;

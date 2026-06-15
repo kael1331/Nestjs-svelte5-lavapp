@@ -18,6 +18,7 @@
 
   // Wash Settings states
   let washName = $state('');
+  let washAddress = $state('');
   let washPaymentAlias = $state('');
   let washBaysCount = $state(1);
   let washLat = $state<number>(-26.82414);
@@ -26,13 +27,28 @@
   let saveSettingsSuccess = $state('');
   let saveSettingsError = $state('');
 
+  // Image preview modal states
+  let showPhotoModal = $state(false);
+  let selectedPhotoUrl = $state('');
+
+  // Editing vehicle states
+  let editingVehicleId = $state<string | null>(null);
+  let editingVehicleName = $state('');
+
   // Map and Geocoding states
   let searchAddress = $state('');
   let geocodingResults = $state<any[]>([]);
   let searchingGeocode = $state(false);
+  let mapElement = $state<HTMLDivElement | null>(null);
+  let gettingLocation = $state(false);
   let map: any = null;
   let marker: any = null;
   let L: any = null;
+
+  function openPhotoModal(url: string) {
+    selectedPhotoUrl = url;
+    showPhotoModal = true;
+  }
 
   // Wash Photos Gallery states
   let photosFileInput = $state<HTMLInputElement>();
@@ -121,11 +137,7 @@
 
   function computedIsOpen(): boolean {
     if (!carWash) return false;
-    const mode = carWash.openingMode || 'automatic';
-    if (mode === 'manual') {
-      return carWash.isManuallyOpen;
-    }
-    return isCurrentlyWorkingTime() && carWash.isManuallyOpen;
+    return carWash.isManuallyOpen;
   }
 
   async function handleToggleOpeningMode(mode: string) {
@@ -158,6 +170,7 @@
         carWash = await res.json();
         // Populate edit settings
         washName = carWash.name || '';
+        washAddress = carWash.address || '';
         washPaymentAlias = carWash.clientPaymentAlias || '';
         washBaysCount = carWash.baysCount || 1;
         washLat = carWash.latitude ? parseFloat(carWash.latitude) : -26.82414;
@@ -261,40 +274,71 @@
     vehiclesList.filter(v => v.isActive)
   );
 
-  // Trigger leaflet loading on Wash Settings tab
+  // Clear success/error messages on tab change
   $effect(() => {
-    if (navStore.activeTab === 'wash-settings' && carWash) {
-      setTimeout(async () => {
-        if (typeof window !== 'undefined') {
-          if (!L) {
-            L = await import('leaflet');
-          }
-          const container = document.getElementById('map');
-          if (container) {
-            if (map) {
-              map.invalidateSize();
-              return;
-            }
+    const tab = navStore.activeTab;
+    saveSettingsSuccess = '';
+    saveSettingsError = '';
+    uploadError = '';
+    uploadSuccess = '';
+    uploadPhotosError = '';
+    vehicleError = '';
+    serviceError = '';
+  });
 
-            const initialLat = washLat;
-            const initialLng = washLng;
-
-            map = L.map('map').setView([initialLat, initialLng], 14);
-
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-              attribution: '© OpenStreetMap contributors'
-            }).addTo(map);
-
-            marker = L.marker([initialLat, initialLng], { draggable: true }).addTo(map);
-
-            marker.on('dragend', () => {
-              const pos = marker.getLatLng();
-              washLat = pos.lat;
-              washLng = pos.lng;
-            });
-          }
+  // Trigger leaflet loading on Map Element mount
+  $effect(() => {
+    if (mapElement && carWash && typeof window !== 'undefined') {
+      if (map) {
+        try {
+          map.remove();
+        } catch (e) {
+          console.error('Error removing map:', e);
         }
-      }, 100);
+        map = null;
+        marker = null;
+      }
+
+      (async () => {
+        if (!L) {
+          L = await import('leaflet');
+        }
+        if (!mapElement) return;
+
+        const initialLat = washLat;
+        const initialLng = washLng;
+
+        map = L.map(mapElement).setView([initialLat, initialLng], 14);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        marker = L.marker([initialLat, initialLng], { draggable: true }).addTo(map);
+
+        marker.on('dragend', () => {
+          const pos = marker.getLatLng();
+          washLat = pos.lat;
+          washLng = pos.lng;
+          fetchAddressFromCoords(pos.lat, pos.lng);
+        });
+
+        if (!washAddress) {
+          fetchAddressFromCoords(initialLat, initialLng);
+        }
+      })();
+
+      return () => {
+        if (map) {
+          try {
+            map.remove();
+          } catch (e) {
+            console.error('Error removing map on cleanup:', e);
+          }
+          map = null;
+          marker = null;
+        }
+      };
     }
   });
 
@@ -333,6 +377,7 @@
         },
         body: JSON.stringify({
           name: washName,
+          address: washAddress,
           clientPaymentAlias: washPaymentAlias,
           baysCount: washBaysCount,
           latitude: washLat,
@@ -353,6 +398,38 @@
     }
   }
 
+  async function fetchAddressFromCoords(lat: number, lng: number) {
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`);
+      if (res.ok) {
+        const data = await res.json();
+        washAddress = data.display_name || '';
+      }
+    } catch (e) {
+      console.error('Error reverse geocoding:', e);
+    }
+  }
+
+  async function syncAutomaticState() {
+    if (!carWash) return;
+    const isWorkingNow = isCurrentlyWorkingTime();
+    try {
+      const res = await fetch(`${apiConfig.baseUrl}/car-washes/my-wash`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authStore.token}`
+        },
+        body: JSON.stringify({ isManuallyOpen: isWorkingNow })
+      });
+      if (res.ok) {
+        carWash.isManuallyOpen = isWorkingNow;
+      }
+    } catch (e) {
+      console.error('Error syncing status:', e);
+    }
+  }
+
   // Address Geocoding
   async function handleGeocodeSearch() {
     if (!searchAddress.trim()) return;
@@ -364,11 +441,44 @@
       const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${fullQuery}&limit=5`);
       if (res.ok) {
         geocodingResults = await res.json();
+        if (geocodingResults.length > 0) {
+          // Auto select the first result to automatically locate the pin
+          selectGeocodeResult(geocodingResults[0]);
+        }
       }
     } catch (e) {
       console.error('Geocoding error:', e);
     } finally {
       searchingGeocode = false;
+    }
+  }
+
+  // Get current position using browser geolocation API
+  function handleGetCurrentLocation() {
+    if (typeof navigator !== 'undefined' && navigator.geolocation) {
+      gettingLocation = true;
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const lat = position.coords.latitude;
+          const lng = position.coords.longitude;
+          washLat = lat;
+          washLng = lng;
+          if (map && marker) {
+            map.setView([lat, lng], 16);
+            marker.setLatLng([lat, lng]);
+          }
+          fetchAddressFromCoords(lat, lng);
+          gettingLocation = false;
+        },
+        (error) => {
+          console.error('Error getting geolocation:', error);
+          saveSettingsError = 'No se pudo obtener la ubicación actual. Permiso denegado o error de geolocalización.';
+          gettingLocation = false;
+        },
+        { enableHighAccuracy: true, timeout: 10000 }
+      );
+    } else {
+      saveSettingsError = 'La geolocalización no está soportada por este navegador.';
     }
   }
 
@@ -379,6 +489,7 @@
     washLng = lon;
     geocodingResults = [];
     searchAddress = res.display_name;
+    washAddress = res.display_name;
 
     if (map && marker) {
       map.setView([lat, lon], 16);
@@ -485,7 +596,7 @@
   }
 
   async function handleDeleteVehicle(id: string) {
-    if (!confirm('¿Seguro que deseas eliminar este vehículo personalizado de tu catálogo?')) return;
+    if (!confirm('¿Seguro que deseas eliminar este vehículo de tu catálogo?')) return;
     try {
       const res = await fetch(`${apiConfig.baseUrl}/admin-vehicles/${id}`, {
         method: 'DELETE',
@@ -499,6 +610,37 @@
     } catch (e) {
       console.error('Error deleting vehicle:', e);
     }
+  }
+
+  async function handleUpdateVehicleName(id: string) {
+    if (!editingVehicleName.trim()) return;
+    try {
+      const res = await fetch(`${apiConfig.baseUrl}/admin-vehicles/${id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authStore.token}`
+        },
+        body: JSON.stringify({ name: editingVehicleName.trim() })
+      });
+      if (res.ok) {
+        editingVehicleId = null;
+        editingVehicleName = '';
+        await fetchVehicles();
+      }
+    } catch (e) {
+      console.error('Error updating vehicle name:', e);
+    }
+  }
+
+  function startEditingVehicle(vehicle: any) {
+    editingVehicleId = vehicle.id;
+    editingVehicleName = vehicle.name;
+  }
+
+  function cancelEditingVehicle() {
+    editingVehicleId = null;
+    editingVehicleName = '';
   }
 
   // Service CRUD functions
@@ -646,7 +788,7 @@
                 <h4 class="alert-title">Suscripción Inactiva</h4>
                 <p class="alert-description">
                   Tu lavadero se encuentra desactivado y no figura públicamente en las búsquedas de los clientes.
-                  Realiza la transferencia y carga tu comprobante de pago en la pestaña <strong>Settings</strong> para activarlo.
+                  Realiza la transferencia y carga tu comprobante de pago en la pestaña <strong>Membresía</strong> para activarlo.
                 </p>
               </div>
             </div>
@@ -654,11 +796,14 @@
 
           <div class="grid-stats">
             <div class="stat-card">
-              <span class="stat-label">Operación Manual</span>
-              <span class="stat-value" class:text-active={carWash?.isManuallyOpen} class:text-inactive={!carWash?.isManuallyOpen}>
-                {carWash?.isManuallyOpen ? 'Abierto' : 'Cerrado'}
+              <span class="stat-label">Estado del Lavadero</span>
+              <span class="stat-value" class:text-active={computedIsOpen()} class:text-inactive={!computedIsOpen()}>
+                {computedIsOpen() ? 'Abierto' : 'Cerrado'}
               </span>
-              <span class="stat-desc">Controlado desde la pestaña Operations</span>
+              <span class="stat-desc">
+                {carWash?.openingMode === 'automatic' ? '⏱️ Automático' : '🎮 Manual'} -
+                {computedIsOpen() ? 'Disponible para reservas' : 'Cerrado temporalmente'}
+              </span>
             </div>
             
             <div class="stat-card">
@@ -681,28 +826,6 @@
               <span class="stat-desc">Espacios de lavado físico</span>
             </div>
           </div>
-
-          <div class="user-info-box">
-            <h4 class="section-title">Datos Administrativos</h4>
-            <div class="info-row">
-              <span class="info-label">Nombre del Establecimiento:</span>
-              <span class="info-value">{carWash?.name || 'Establecimiento sin nombre'}</span>
-            </div>
-            <div class="info-row">
-              <span class="info-label">Dueño / Encargado:</span>
-              <span class="info-value">{authStore.user?.name || 'Administrador'}</span>
-            </div>
-            <div class="info-row">
-              <span class="info-label">Email de contacto:</span>
-              <span class="info-value">{authStore.user?.email || 'N/A'}</span>
-            </div>
-            <div class="info-row">
-              <span class="info-label">Membresía Vence:</span>
-              <span class="info-value highlight-green font-outfit">
-                {carWash?.subscriptionExpiresAt ? new Date(carWash.subscriptionExpiresAt).toLocaleDateString() : 'Sin membresía activa'}
-              </span>
-            </div>
-          </div>
         </div>
 
       <!-- 2. OPERATIONS TAB -->
@@ -715,7 +838,7 @@
               <span class="warning-icon">⚠️</span>
               <div>
                 <h4 class="alert-title">Acceso Restringido</h4>
-                <p class="alert-description">Esta sección requiere que tu membresía esté activa. Por favor, ve a la pestaña <strong>Settings</strong> para habilitar el servicio y gestionar las operaciones en tiempo real.</p>
+                <p class="alert-description">Esta sección requiere que tu membresía esté activa. Por favor, ve a la pestaña <strong>Membresía</strong> para habilitar el servicio y gestionar las operaciones en tiempo real.</p>
               </div>
             </div>
           {:else}
@@ -763,6 +886,7 @@
                         ? '🟢 Dentro del horario de atención laboral' 
                         : '🔴 Fuera del horario de atención laboral'}
                       {(!carWash.isManuallyOpen && isCurrentlyWorkingTime()) ? ' (Forzado a Cerrado)' : ''}
+                      {(carWash.isManuallyOpen && !isCurrentlyWorkingTime()) ? ' (Forzado a Abierto)' : ''}
                     </span>
                   {/if}
                 </div>
@@ -776,6 +900,15 @@
                 <span style="font-size: 11px; color: #64748b; font-weight: 700; text-transform: uppercase;">Interruptor Manual</span>
               </div>
             </div>
+
+            {#if carWash?.openingMode === 'automatic' && carWash?.isManuallyOpen !== isCurrentlyWorkingTime()}
+              <div class="alert-box-warning" style="margin-top: 16px; background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 12px; padding: 12px 16px; font-size: 13px; color: #f59e0b; display: flex; align-items: center; justify-content: space-between; max-width: 800px;">
+                <span>⚠️ Se aplicó una sobreescritura manual. Tu horario de atención laboral indica que el local debería figurar <strong>{isCurrentlyWorkingTime() ? 'Abierto' : 'Cerrado'}</strong>.</span>
+                <button onclick={syncAutomaticState} class="btn-secondary" style="padding: 4px 12px; font-size: 11px; margin-top: 0; margin-left: 12px; border-color: rgba(245, 158, 11, 0.3); color: #f59e0b; background: transparent;">
+                  Sincronizar
+                </button>
+              </div>
+            {/if}
 
             <div class="admin-actions-placeholder" style="margin-top: 24px;">
               <h5 class="info-label" style="color: #f1f5f9; font-weight: 600; margin-bottom: 8px;">Próxima Fase: Pedidos y Turnos</h5>
@@ -814,7 +947,19 @@
                     <tbody>
                       {#each vehiclesList as vehicle}
                         <tr>
-                          <td class="font-outfit" style="font-weight: 600; color: #f1f5f9;">{vehicle.name}</td>
+                          <td>
+                            {#if editingVehicleId === vehicle.id}
+                              <input 
+                                type="text" 
+                                bind:value={editingVehicleName} 
+                                class="file-input" 
+                                style="padding: 4px 8px; font-size: 13px; max-width: 150px; display: inline-block;" 
+                                onkeydown={(e) => e.key === 'Enter' && handleUpdateVehicleName(vehicle.id)}
+                              />
+                            {:else}
+                              <span class="font-outfit" style="font-weight: 600; color: #f1f5f9;">{vehicle.name}</span>
+                            {/if}
+                          </td>
                           <td>
                             <button 
                               onclick={() => toggleVehicleActive(vehicle.id, vehicle.isActive)} 
@@ -825,13 +970,23 @@
                             </button>
                           </td>
                           <td>
-                            {#if vehicle.isCustom}
-                              <button onclick={() => handleDeleteVehicle(vehicle.id)} class="btn-action-danger" aria-label="Eliminar">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-                              </button>
-                            {:else}
-                              <span class="text-muted" style="font-size: 11px;">Estándar</span>
-                            {/if}
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                              {#if editingVehicleId === vehicle.id}
+                                <button onclick={() => handleUpdateVehicleName(vehicle.id)} class="btn-action-edit" style="color: #34d399; border-color: rgba(52, 211, 153, 0.2); font-weight: bold;" aria-label="Guardar">
+                                  ✓
+                                </button>
+                                <button onclick={cancelEditingVehicle} class="btn-action-edit" style="color: #f87171; border-color: rgba(248, 113, 113, 0.2); font-weight: bold;" aria-label="Cancelar">
+                                  ✕
+                                </button>
+                              {:else}
+                                <button onclick={() => startEditingVehicle(vehicle)} class="btn-action-edit" aria-label="Editar Nombre">
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+                                </button>
+                                <button onclick={() => handleDeleteVehicle(vehicle.id)} class="btn-action-danger" aria-label="Eliminar">
+                                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                                </button>
+                              {/if}
+                            </div>
                           </td>
                         </tr>
                       {/each}
@@ -888,7 +1043,7 @@
               <span class="warning-icon">⚠️</span>
               <div>
                 <h4 class="alert-title">Acceso Restringido</h4>
-                <p class="alert-description">Esta sección requiere que tu membresía esté activa. Por favor, ve a la pestaña <strong>Settings</strong> para habilitar el servicio y definir tus precios y servicios.</p>
+                <p class="alert-description">Esta sección requiere que tu membresía esté activa. Por favor, ve a la pestaña <strong>Membresía</strong> para habilitar el servicio y definir tus precios y servicios.</p>
               </div>
             </div>
           {:else}
@@ -935,7 +1090,7 @@
       <!-- 5. MEMBERSHIP TAB (Settings) -->
       {:else if navStore.activeTab === 'membership'}
         <div class="content-panel animate-fade">
-          <h3 class="panel-subtitle">Settings (Membresía)</h3>
+          <h3 class="panel-subtitle">Membresía</h3>
           <p class="section-desc">Consulta los datos para tu membresía mensual, sube comprobantes de transferencia o revisa tu historial de pagos.</p>
 
           <div class="membership-layout">
@@ -1020,12 +1175,35 @@
               {/if}
             </div>
           </div>
+
+          <!-- Datos Administrativos moved here -->
+          <div class="user-info-box" style="margin-top: 32px; max-width: 100%;">
+            <h4 class="section-title">Datos Administrativos de Membresía</h4>
+            <div class="info-row">
+              <span class="info-label">Nombre del Establecimiento:</span>
+              <span class="info-value">{carWash?.name || 'Establecimiento sin nombre'}</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Dueño / Encargado:</span>
+              <span class="info-value">{authStore.user?.name || 'Administrador'}</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Email de contacto:</span>
+              <span class="info-value">{authStore.user?.email || 'N/A'}</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Membresía Vence:</span>
+              <span class="info-value highlight-green font-outfit">
+                {carWash?.subscriptionExpiresAt ? new Date(carWash.subscriptionExpiresAt).toLocaleDateString() : 'Sin membresía activa'}
+              </span>
+            </div>
+          </div>
         </div>
 
       <!-- 6. WASH-SETTINGS TAB -->
       {:else if navStore.activeTab === 'wash-settings'}
         <div class="content-panel animate-fade">
-          <h3 class="panel-subtitle">wash Settings</h3>
+          <h3 class="panel-subtitle">Configuración</h3>
           <p class="section-desc">Configura los datos comerciales del local, gestiona la galería de fotos y ubica con precisión tu local en el mapa para que lo vean los clientes.</p>
 
           <div class="settings-container">
@@ -1041,6 +1219,18 @@
                   bind:value={washName} 
                   class="file-input" 
                 />
+              </div>
+
+              <div class="form-group">
+                <label for="wash-address-input" class="file-label">Dirección física del lavadero (calculada o ingresada):</label>
+                <textarea 
+                  id="wash-address-input" 
+                  rows="2"
+                  placeholder="Ej: Av. Mate de Luna 2030, San Miguel de Tucumán" 
+                  bind:value={washAddress} 
+                  class="file-input" 
+                  style="resize: vertical;"
+                ></textarea>
               </div>
 
               <div class="form-group">
@@ -1096,7 +1286,16 @@
                 <span>Latitud: {washLat.toFixed(6)}</span> | <span>Longitud: {washLng.toFixed(6)}</span>
               </div>
 
-              <div id="map" class="map-container"></div>
+              <div style="margin-top: 12px; margin-bottom: 12px;">
+                <button type="button" onclick={handleGetCurrentLocation} disabled={gettingLocation} class="btn-secondary" style="margin-top: 0; padding: 8px 14px; font-size: 12px; display: inline-flex; align-items: center; gap: 6px;">
+                  {#if gettingLocation}
+                    <div class="spinner-small" style="width: 12px; height: 12px; border-width: 2px;"></div>
+                  {/if}
+                  📍 {gettingLocation ? 'Obteniendo...' : 'Usar mi ubicación actual'}
+                </button>
+              </div>
+
+              <div bind:this={mapElement} id="map" class="map-container"></div>
 
               {#if saveSettingsError}
                 <p class="error-msg">{saveSettingsError}</p>
@@ -1118,7 +1317,7 @@
             <!-- Galería de Fotos del Local -->
             <div class="settings-form-card">
               <h4 class="payment-title">Galería de Fotos del Local</h4>
-              <p class="payment-subtitle font-outfit">Sube hasta varias fotos de tus instalaciones para captar la atención de tus clientes.</p>
+              <p class="payment-subtitle font-outfit">Sube varias fotos de tus instalaciones para captar la atención de tus clientes.</p>
 
               <div class="upload-photos-box">
                 <label for="photos-upload-input" class="file-label">Subir fotos (selecciona una o más):</label>
@@ -1146,19 +1345,25 @@
               {#if !carWash?.photos || carWash.photos.length === 0}
                 <p class="empty-history" style="text-align: center; margin: 32px 0;">No tienes fotos subidas.</p>
               {:else}
-                <div class="photos-grid">
-                  {#each carWash.photos as photo}
-                    <div class="photo-card">
-                      <img src={`${apiConfig.baseUrl}${photo.photoUrl}`} alt="Foto del lavadero" class="photo-img" />
-                      <button onclick={() => handleDeletePhoto(photo.id)} class="btn-delete-photo" aria-label="Eliminar Foto">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-                      </button>
+                <div class="photos-list" style="display: flex; flex-direction: column; gap: 10px; margin-top: 12px;">
+                  {#each carWash.photos as photo, idx}
+                    <div class="photo-list-item" style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: rgba(15, 23, 42, 0.25); border: 1px solid rgba(255,255,255,0.05); border-radius: 8px;">
+                      <span class="photo-name font-outfit" style="font-size: 13px; font-weight: 500; color: #cbd5e1;">📷 Foto {idx + 1}</span>
+                      <div class="photo-item-actions" style="display: flex; gap: 8px; align-items: center;">
+                        <button onclick={() => openPhotoModal(photo.url)} class="btn-secondary" style="padding: 4px 10px; font-size: 12px; margin-top:0;" aria-label="Ver Foto">
+                          👁️ Ver
+                        </button>
+                        <button onclick={() => handleDeletePhoto(photo.id)} class="btn-action-danger" style="padding: 6px;" aria-label="Eliminar Foto">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                        </button>
+                      </div>
                     </div>
                   {/each}
                 </div>
               {/if}
             </div>
           </div>
+
         </div>
       {/if}
 
@@ -1217,6 +1422,28 @@
         <button onclick={saveService} disabled={savingService || activeVehicles.length === 0} class="btn-primary" style="margin-top:0; width:auto;">
           {savingService ? 'Guardando...' : 'Guardar Servicio'}
         </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- MODAL VISUALIZAR FOTO -->
+{#if showPhotoModal}
+  <div class="modal-overlay" onclick={() => showPhotoModal = false} style="z-index: 2000;">
+    <div class="modal-content animate-fade" style="max-width: 650px; background: #0f172a; border: 1px solid rgba(255, 255, 255, 0.1);" onclick={(e) => e.stopPropagation()}>
+      <div class="modal-header" style="border-bottom: 1px solid rgba(255, 255, 255, 0.05); padding-bottom: 12px; display: flex; justify-content: space-between; align-items: center; width: 100%; box-sizing: border-box;">
+        <h4 class="payment-title" style="margin: 0; color: #f1f5f9; font-family: 'Outfit', sans-serif;">Vista Previa de la Foto</h4>
+        <button onclick={() => showPhotoModal = false} class="close-modal-btn" style="background: none; border: none; color: #94a3b8; font-size: 18px; cursor: pointer; padding: 4px;">✕</button>
+      </div>
+      <div class="modal-body" style="text-align: center; display: flex; justify-content: center; align-items: center; padding: 24px 16px; background: #0b0f19;">
+        <img 
+          src={selectedPhotoUrl.startsWith('http') ? selectedPhotoUrl : `${apiConfig.baseUrl}${selectedPhotoUrl}`} 
+          alt="Foto del Establecimiento" 
+          style="max-width: 100%; max-height: 65vh; border-radius: 8px; object-fit: contain; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);" 
+        />
+      </div>
+      <div class="modal-footer" style="border-top: 1px solid rgba(255, 255, 255, 0.05); padding-top: 12px; display: flex; justify-content: flex-end; width: 100%; box-sizing: border-box;">
+        <button onclick={() => showPhotoModal = false} class="btn-secondary" style="margin-top: 0;">Cerrar</button>
       </div>
     </div>
   </div>

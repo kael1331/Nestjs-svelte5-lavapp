@@ -23,6 +23,10 @@ export class CarWash {
   @ApiProperty({ description: 'Nombre comercial del lavadero', required: false })
   name: string;
 
+  @Column({ length: 255, nullable: true })
+  @ApiProperty({ description: 'Dirección física/postal del lavadero', required: false })
+  address: string;
+
   @Column('decimal', { precision: 10, scale: 8, nullable: true })
   @ApiProperty({ description: 'Coordenada de latitud', required: false })
   latitude: number;
