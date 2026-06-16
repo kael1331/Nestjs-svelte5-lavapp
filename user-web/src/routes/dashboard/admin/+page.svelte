@@ -40,7 +40,6 @@
   let geocodingResults = $state<any[]>([]);
   let searchingGeocode = $state(false);
   let mapElement = $state<HTMLDivElement | null>(null);
-  let gettingLocation = $state(false);
   let map: any = null;
   let marker: any = null;
   let L: any = null;
@@ -320,12 +319,7 @@
           const pos = marker.getLatLng();
           washLat = pos.lat;
           washLng = pos.lng;
-          fetchAddressFromCoords(pos.lat, pos.lng);
         });
-
-        if (!washAddress) {
-          fetchAddressFromCoords(initialLat, initialLng);
-        }
       })();
 
       return () => {
@@ -398,17 +392,7 @@
     }
   }
 
-  async function fetchAddressFromCoords(lat: number, lng: number) {
-    try {
-      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`);
-      if (res.ok) {
-        const data = await res.json();
-        washAddress = data.display_name || '';
-      }
-    } catch (e) {
-      console.error('Error reverse geocoding:', e);
-    }
-  }
+
 
   async function syncAutomaticState() {
     if (!carWash) return;
@@ -453,34 +437,7 @@
     }
   }
 
-  // Get current position using browser geolocation API
-  function handleGetCurrentLocation() {
-    if (typeof navigator !== 'undefined' && navigator.geolocation) {
-      gettingLocation = true;
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const lat = position.coords.latitude;
-          const lng = position.coords.longitude;
-          washLat = lat;
-          washLng = lng;
-          if (map && marker) {
-            map.setView([lat, lng], 16);
-            marker.setLatLng([lat, lng]);
-          }
-          fetchAddressFromCoords(lat, lng);
-          gettingLocation = false;
-        },
-        (error) => {
-          console.error('Error getting geolocation:', error);
-          saveSettingsError = 'No se pudo obtener la ubicación actual. Permiso denegado o error de geolocalización.';
-          gettingLocation = false;
-        },
-        { enableHighAccuracy: true, timeout: 10000 }
-      );
-    } else {
-      saveSettingsError = 'La geolocalización no está soportada por este navegador.';
-    }
-  }
+
 
   function selectGeocodeResult(res: any) {
     const lat = parseFloat(res.lat);
@@ -1286,14 +1243,7 @@
                 <span>Latitud: {washLat.toFixed(6)}</span> | <span>Longitud: {washLng.toFixed(6)}</span>
               </div>
 
-              <div style="margin-top: 12px; margin-bottom: 12px;">
-                <button type="button" onclick={handleGetCurrentLocation} disabled={gettingLocation} class="btn-secondary" style="margin-top: 0; padding: 8px 14px; font-size: 12px; display: inline-flex; align-items: center; gap: 6px;">
-                  {#if gettingLocation}
-                    <div class="spinner-small" style="width: 12px; height: 12px; border-width: 2px;"></div>
-                  {/if}
-                  📍 {gettingLocation ? 'Obteniendo...' : 'Usar mi ubicación actual'}
-                </button>
-              </div>
+
 
               <div bind:this={mapElement} id="map" class="map-container"></div>
 
